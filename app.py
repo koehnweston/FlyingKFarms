@@ -64,7 +64,6 @@ def fetch_openet_data(_geometry, start_date, end_date, api_key):
     Fetches time series data from the OpenET API for a given geometry.
     """
     API_URL = "https://openet-api.org/v2/timeseries/geometry"
-    # Explicitly set content type and include Authorization
     headers = {
         "Content-Type": "application/json",
         "Authorization": api_key
@@ -80,6 +79,10 @@ def fetch_openet_data(_geometry, start_date, end_date, api_key):
         "output_format": "csv"
     }
 
+    if st.session_state.get("debug_mode", False):
+        st.sidebar.subheader("API Request Payload")
+        st.sidebar.json(payload)
+
     try:
         response = requests.post(API_URL, headers=headers, json=payload)
         response.raise_for_status()
@@ -88,7 +91,6 @@ def fetch_openet_data(_geometry, start_date, end_date, api_key):
         df['date'] = pd.to_datetime(df['time'])
         df.set_index('date', inplace=True)
         
-        # Rename columns for clarity
         rename_map = {col: 'ET (mm)' for col in df.columns if 'et_ensemble' in col}
         rename_map.update({col: 'NDVI' for col in df.columns if 'ndvi_ensemble' in col})
         df.rename(columns=rename_map, inplace=True)
@@ -96,10 +98,16 @@ def fetch_openet_data(_geometry, start_date, end_date, api_key):
         return df[['ET (mm)', 'NDVI']]
         
     except requests.exceptions.RequestException as e:
-        # Provide more specific feedback for 404 errors
-        if e.response.status_code == 404:
+        if e.response and e.response.status_code == 404:
             st.error("OpenET API Error: 404 Not Found.")
-            st.warning("This commonly occurs if the selected field's location is outside of OpenET's coverage area (primarily the Western US).")
+            st.warning("""
+                This can occur for a few reasons:
+                1.  **Location:** The selected field might be outside OpenET's coverage area.
+                2.  **API Key:** The API key in your Streamlit secrets might be invalid or expired. Please double-check it.
+                3.  **Request Format:** There might be an issue with the data sent.
+                
+                Enable "Debug Mode" in the sidebar to view the exact data payload sent to the API.
+            """)
         else:
             st.error(f"OpenET API Error: {e}")
             st.error(f"Response content: {e.response.text if e.response else 'No response'}")
@@ -111,6 +119,8 @@ st.markdown("# 🌾 Farming Data Entry")
 # --- Sidebar ---
 st.sidebar.header("Field Setup")
 st.sidebar.info("Field data is automatically loaded from GitHub.")
+
+st.session_state.debug_mode = st.sidebar.checkbox("Enable Debug Mode")
 
 if st.sidebar.button("Clear Cache & Reload Data"):
     st.cache_data.clear()
@@ -232,7 +242,6 @@ else:
         with st.form(form_key_map[data_type]):
             st.subheader("Data Details")
             columns = st.columns(2)
-            # Create a list of the dictionary's items to ensure consistent order
             field_items = list(fields_map[data_type].items())
             for i, (name, (func, args, kwargs)) in enumerate(field_items):
                 with columns[i % 2]:
