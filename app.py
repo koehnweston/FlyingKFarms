@@ -7,6 +7,8 @@ import requests
 from datetime import date
 import tempfile
 import os
+import folium
+from streamlit_folium import st_folium
 
 # --- Page Configuration ---
 # Set the layout to wide for better form visibility
@@ -19,32 +21,28 @@ SHAPEFILE_URL = "https://raw.githubusercontent.com/koehnweston/FlyingKFarms/main
 @st.cache_data
 def load_data_from_github(url):
     """
-    Loads a zipped shapefile from a GitHub raw URL.
-    This version dynamically finds the .shp file within the zip archive.
+    Loads, processes, and re-projects a zipped shapefile from a GitHub URL.
     """
     tmp_path = None
     try:
         response = requests.get(url)
-        # Raise an exception if the request was unsuccessful
         response.raise_for_status()
         
-        # Create a temporary file to save the zip content
         with tempfile.NamedTemporaryFile(delete=False, suffix=".zip") as tmp:
             tmp.write(response.content)
             tmp_path = tmp.name
 
-        # Inspect the zip file to find the shapefile name dynamically
         with zipfile.ZipFile(tmp_path, 'r') as zf:
-            # Find the first file ending with .shp (case-insensitive)
             shapefile_name = next((name for name in zf.namelist() if name.lower().endswith('.shp')), None)
-            
             if not shapefile_name:
                 st.error("Error: No .shp file found inside the zip archive.")
                 return None
         
-        # Construct the specific URI for geopandas to read the file from within the zip
         uri = f"zip://{tmp_path}!{shapefile_name}"
         gdf = gpd.read_file(uri)
+        
+        # --- IMPORTANT: Re-project to standard web mapping CRS (WGS 84) ---
+        gdf = gdf.to_crs(epsg=4326)
         return gdf
         
     except requests.exceptions.RequestException as e:
@@ -54,7 +52,6 @@ def load_data_from_github(url):
         st.error(f"Error reading shapefile: {e}")
         return None
     finally:
-        # Clean up the temporary file
         if tmp_path and os.path.exists(tmp_path):
             os.unlink(tmp_path)
 
@@ -68,44 +65,34 @@ st.sidebar.info(
     "Field data is automatically loaded from the `parcels_2.zip` file in the GitHub repository."
 )
 
-# Add a button to clear the cache and rerun the data loading
 if st.sidebar.button("Clear Cache & Reload Data"):
     st.cache_data.clear()
     st.session_state.data_loaded = False
     st.rerun()
 
-# Initialize session state if not already done
 if 'data_loaded' not in st.session_state:
     st.session_state.data_loaded = False
     st.session_state.gdf = None
     st.session_state.field_options = []
 
-# Load data only once
 if not st.session_state.data_loaded:
     with st.spinner("Loading field data from GitHub..."):
         gdf = load_data_from_github(SHAPEFILE_URL)
         if gdf is not None:
-            # --- Normalize column names to be case-insensitive ---
             column_map = {col.lower(): col for col in gdf.columns}
             if 'section' in column_map:
                 gdf.rename(columns={column_map['section']: 'Section'}, inplace=True)
             if 'area' in column_map:
                  gdf.rename(columns={column_map['area']: 'Area'}, inplace=True)
 
-            # --- NEW: Dynamically calculate X and Y from geometry ---
-            # Ensure the geometry column is valid before calculating centroids
             if 'geometry' in gdf.columns and not gdf.empty:
-                # Calculate the centroid of each polygon
                 centroids = gdf.geometry.centroid
-                # Add X and Y columns to the dataframe
                 gdf['X'] = centroids.x
                 gdf['Y'] = centroids.y
             
             st.session_state.gdf = gdf
             
-            # Check for the required 'Section' column after standardization
             if "Section" in gdf.columns:
-                # Get unique, sorted list of sections
                 st.session_state.field_options = sorted(gdf["Section"].unique().tolist())
                 st.sidebar.success(f"Shapefile loaded! Found {len(st.session_state.field_options)} unique sections.")
             else:
@@ -118,7 +105,6 @@ if not st.session_state.data_loaded:
 
 
 # --- Data Entry Section ---
-# Only show the data entry options if a valid shapefile has been loaded
 if not st.session_state.field_options:
     st.warning("Could not load field data. Please check the configuration in the sidebar.")
 else:
@@ -130,42 +116,59 @@ else:
     st.markdown("---")
     st.markdown(f"### Enter {data_type}")
 
-    # --- Reusable Form Component ---
     def data_entry_form(form_key, fields):
         with st.form(form_key):
-            # First, create the section selector and display its info
             st.subheader("Field Information")
             selected_section = st.selectbox("Select Field Section", options=st.session_state.field_options, index=0)
 
-            # Display X, Y, and Area for the selected section
             if selected_section and st.session_state.gdf is not None:
                 section_data = st.session_state.gdf[st.session_state.gdf["Section"] == selected_section].iloc[0]
+                
+                # --- Display Metrics ---
                 col1, col2, col3 = st.columns(3)
                 with col1:
-                    st.metric("X Coordinate", f"{section_data.get('X', 'N/A'):.2f}" if isinstance(section_data.get('X'), (int, float)) else "N/A")
+                    st.metric("X Coordinate", f"{section_data.get('X', 'N/A'):.4f}" if isinstance(section_data.get('X'), (int, float)) else "N/A")
                 with col2:
-                    st.metric("Y Coordinate", f"{section_data.get('Y', 'N/A'):.2f}" if isinstance(section_data.get('Y'), (int, float)) else "N/A")
+                    st.metric("Y Coordinate", f"{section_data.get('Y', 'N/A'):.4f}" if isinstance(section_data.get('Y'), (int, float)) else "N/A")
                 with col3:
                     st.metric("Area", f"{section_data.get('Area', 'N/A'):.2f}" if isinstance(section_data.get('Area'), (int, float)) else "N/A")
+
+                # --- NEW: Interactive Map ---
+                st.markdown("##### Field Map")
+                map_center = [section_data.geometry.centroid.y, section_data.geometry.centroid.x]
+                m = folium.Map(location=map_center, zoom_start=15)
+
+                # Add high-resolution satellite imagery
+                folium.TileLayer(
+                    'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+                    attr='Esri',
+                    name='Esri Satellite',
+                    overlay=False,
+                    control=True
+                ).add_to(m)
+                
+                # Add the selected polygon to the map
+                folium.GeoJson(
+                    section_data.geometry,
+                    style_function=lambda x: {'fillColor': 'cyan', 'color': 'blue', 'weight': 2.5, 'fillOpacity': 0.4}
+                ).add_to(m)
+                
+                # Render the map in Streamlit
+                st_folium(m, width=725, height=500)
+
             
             st.subheader("Data Details")
-            # Create input fields based on the provided dictionary
             form_inputs = {}
             columns = st.columns(2)
             for i, (name, (func, args, kwargs)) in enumerate(fields.items()):
                 with columns[i % 2]:
                     form_inputs[name] = func(*args, **kwargs)
 
-            # Text area for notes is common to all forms
             notes = st.text_area("Notes")
             
             submitted = st.form_submit_button(f"Submit {data_type}")
             if submitted:
                 st.success(f"{data_type} for section '{selected_section}' submitted successfully!")
-                # In a real app, you would save this data to a database.
-                # data_to_save = {"section": selected_section, "notes": notes, **form_inputs}
-                # st.write(data_to_save)
-
 
     # --- Define and Render Forms ---
     if data_type == "Water Usage":
