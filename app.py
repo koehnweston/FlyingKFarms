@@ -11,8 +11,8 @@ from datetime import date
 st.set_page_config(page_title="Farming Data Entry", page_icon="🌾", layout="wide")
 
 # --- Data Loading ---
-# IMPORTANT: Replace this with the direct raw URL to your file on GitHub
-SHAPEFILE_URL = "https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPONAME/main/parcels_2.zip"
+# This is the direct raw URL to your file on GitHub
+SHAPEFILE_URL = "https://raw.githubusercontent.com/koehnweston/FlyingKFarms/main/parcels_2.zip"
 
 @st.cache_data
 def load_data_from_github(url):
