@@ -5,6 +5,8 @@ import zipfile
 import io
 import requests
 from datetime import date
+import tempfile
+import os
 
 # --- Page Configuration ---
 # Set the layout to wide for better form visibility
@@ -16,24 +18,32 @@ SHAPEFILE_URL = "https://raw.githubusercontent.com/koehnweston/FlyingKFarms/main
 
 @st.cache_data
 def load_data_from_github(url):
-    """Loads a zipped shapefile from a GitHub raw URL."""
+    """Loads a zipped shapefile from a GitHub raw URL by saving to a temporary file."""
+    tmp_path = None
     try:
         response = requests.get(url)
         # Raise an exception if the request was unsuccessful
         response.raise_for_status()
         
-        # Read the content into an in-memory buffer
-        buffer = io.BytesIO(response.content)
-        
-        # Geopandas can read a zip file directly from a file-like object
-        gdf = gpd.read_file(buffer)
+        # Create a temporary file to save the zip content
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".zip") as tmp:
+            tmp.write(response.content)
+            tmp_path = tmp.name
+
+        # Geopandas reads the zip file directly from the temp path
+        gdf = gpd.read_file(tmp_path)
         return gdf
+        
     except requests.exceptions.RequestException as e:
         st.error(f"Error fetching data from URL: {e}")
         return None
     except Exception as e:
         st.error(f"Error reading shapefile: {e}")
         return None
+    finally:
+        # Clean up the temporary file
+        if tmp_path and os.path.exists(tmp_path):
+            os.unlink(tmp_path)
 
 
 # --- Main App ---
