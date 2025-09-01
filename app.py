@@ -153,8 +153,9 @@ else:
                     style_function=lambda x: {'fillColor': 'cyan', 'color': 'blue', 'weight': 2.5, 'fillOpacity': 0.4}
                 ).add_to(m)
                 
-                # Render the map in Streamlit
-                st_folium(m, width=725, height=500)
+                # Render the map in Streamlit.
+                # The 'key' parameter is crucial to force the map to re-render when the section changes.
+                st_folium(m, key=selected_section, width=725, height=500)
 
             
             st.subheader("Data Details")
