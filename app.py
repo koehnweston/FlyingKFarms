@@ -114,50 +114,48 @@ else:
     )
 
     st.markdown("---")
-    st.markdown(f"### Enter {data_type}")
+    
+    # --- Field Selection and Map (Moved outside the form) ---
+    st.subheader("Field Information")
+    selected_section = st.selectbox("Select Field Section", options=st.session_state.field_options, index=0)
 
+    if selected_section and st.session_state.gdf is not None:
+        section_data = st.session_state.gdf[st.session_state.gdf["Section"] == selected_section].iloc[0]
+        
+        # Display Metrics
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("X Coordinate", f"{section_data.get('X', 'N/A'):.4f}" if isinstance(section_data.get('X'), (int, float)) else "N/A")
+        with col2:
+            st.metric("Y Coordinate", f"{section_data.get('Y', 'N/A'):.4f}" if isinstance(section_data.get('Y'), (int, float)) else "N/A")
+        with col3:
+            st.metric("Area", f"{section_data.get('Area', 'N/A'):.2f}" if isinstance(section_data.get('Area'), (int, float)) else "N/A")
+
+        # Interactive Map
+        st.markdown("##### Field Map")
+        map_center = [section_data.geometry.centroid.y, section_data.geometry.centroid.x]
+        m = folium.Map(location=map_center, zoom_start=15)
+
+        folium.TileLayer(
+            'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+            attr='Esri',
+            name='Esri Satellite',
+            overlay=False,
+            control=True
+        ).add_to(m)
+        
+        folium.GeoJson(
+            section_data.geometry,
+            style_function=lambda x: {'fillColor': 'cyan', 'color': 'blue', 'weight': 2.5, 'fillOpacity': 0.4}
+        ).add_to(m)
+        
+        st_folium(m, key=selected_section, width=725, height=500)
+
+    # --- Data Entry Form ---
+    st.markdown(f"### Enter {data_type}")
+    
     def data_entry_form(form_key, fields):
         with st.form(form_key):
-            st.subheader("Field Information")
-            selected_section = st.selectbox("Select Field Section", options=st.session_state.field_options, index=0)
-
-            if selected_section and st.session_state.gdf is not None:
-                section_data = st.session_state.gdf[st.session_state.gdf["Section"] == selected_section].iloc[0]
-                
-                # --- Display Metrics ---
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.metric("X Coordinate", f"{section_data.get('X', 'N/A'):.4f}" if isinstance(section_data.get('X'), (int, float)) else "N/A")
-                with col2:
-                    st.metric("Y Coordinate", f"{section_data.get('Y', 'N/A'):.4f}" if isinstance(section_data.get('Y'), (int, float)) else "N/A")
-                with col3:
-                    st.metric("Area", f"{section_data.get('Area', 'N/A'):.2f}" if isinstance(section_data.get('Area'), (int, float)) else "N/A")
-
-                # --- NEW: Interactive Map ---
-                st.markdown("##### Field Map")
-                map_center = [section_data.geometry.centroid.y, section_data.geometry.centroid.x]
-                m = folium.Map(location=map_center, zoom_start=15)
-
-                # Add high-resolution satellite imagery
-                folium.TileLayer(
-                    'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-                    attr='Esri',
-                    name='Esri Satellite',
-                    overlay=False,
-                    control=True
-                ).add_to(m)
-                
-                # Add the selected polygon to the map
-                folium.GeoJson(
-                    section_data.geometry,
-                    style_function=lambda x: {'fillColor': 'cyan', 'color': 'blue', 'weight': 2.5, 'fillOpacity': 0.4}
-                ).add_to(m)
-                
-                # Render the map in Streamlit.
-                # The 'key' parameter is crucial to force the map to re-render when the section changes.
-                st_folium(m, key=selected_section, width=725, height=500)
-
-            
             st.subheader("Data Details")
             form_inputs = {}
             columns = st.columns(2)
@@ -169,6 +167,7 @@ else:
             
             submitted = st.form_submit_button(f"Submit {data_type}")
             if submitted:
+                # 'selected_section' is accessible here because it's defined outside the form
                 st.success(f"{data_type} for section '{selected_section}' submitted successfully!")
 
     # --- Define and Render Forms ---
