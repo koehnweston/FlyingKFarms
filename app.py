@@ -3,32 +3,37 @@ import pandas as pd
 import geopandas as gpd
 import zipfile
 import io
+import requests
 from datetime import date
 
 # --- Page Configuration ---
 # Set the layout to wide for better form visibility
 st.set_page_config(page_title="Farming Data Entry", page_icon="🌾", layout="wide")
 
+# --- Data Loading ---
+# IMPORTANT: Replace this with the direct raw URL to your file on GitHub
+SHAPEFILE_URL = "https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPONAME/main/parcels_2.zip"
 
-# --- Helper Function to Read Shapefile ---
-# This function will handle reading the zipped shapefile from the uploader
 @st.cache_data
-def load_shapefile(uploaded_file):
-    """Loads a zipped shapefile into a GeoDataFrame."""
-    if uploaded_file is not None:
-        try:
-            # We need to read the file into memory
-            buffer = io.BytesIO(uploaded_file.getvalue())
-            with zipfile.ZipFile(buffer) as z:
-                # Find the .shp file name in the zip archive
-                shp_filename = [name for name in z.namelist() if name.endswith('.shp')][0]
-                # Read the shapefile using geopandas
-                gdf = gpd.read_file(f"zip://{uploaded_file.name}!{shp_filename}")
-                return gdf
-        except Exception as e:
-            st.error(f"Error reading shapefile: {e}")
-            return None
-    return None
+def load_data_from_github(url):
+    """Loads a zipped shapefile from a GitHub raw URL."""
+    try:
+        response = requests.get(url)
+        # Raise an exception if the request was unsuccessful
+        response.raise_for_status()
+        
+        # Read the content into an in-memory buffer
+        buffer = io.BytesIO(response.content)
+        
+        # Geopandas can read a zip file directly from a file-like object
+        gdf = gpd.read_file(buffer)
+        return gdf
+    except requests.exceptions.RequestException as e:
+        st.error(f"Error fetching data from URL: {e}")
+        return None
+    except Exception as e:
+        st.error(f"Error reading shapefile: {e}")
+        return None
 
 
 # --- Main App ---
@@ -37,35 +42,38 @@ st.markdown("# 🌾 Farming Data Entry")
 # --- Sidebar for File Upload and Instructions ---
 st.sidebar.header("Field Setup")
 st.sidebar.info(
-    "Upload a `.zip` file containing your shapefile (`.shp`, `.shx`, `.dbf`, etc.). "
-    "The shapefile must contain a column named 'Section' to identify each field."
+    "Field data is automatically loaded from the `parcels_2.zip` file in the GitHub repository."
 )
 
-uploaded_file = st.sidebar.file_uploader("Upload Zipped Shapefile", type=["zip"])
-
-# Initialize session state to hold the geodataframe and section list
-if 'gdf' not in st.session_state:
+# Initialize session state if not already done
+if 'data_loaded' not in st.session_state:
+    st.session_state.data_loaded = False
     st.session_state.gdf = None
-if 'field_options' not in st.session_state:
     st.session_state.field_options = []
 
-if uploaded_file:
-    gdf = load_shapefile(uploaded_file)
-    if gdf is not None:
-        st.session_state.gdf = gdf
-        # Check for the required 'Section' column
-        if "Section" in gdf.columns:
-            # Get unique, sorted list of sections
-            st.session_state.field_options = sorted(gdf["Section"].unique().tolist())
-            st.sidebar.success(f"Shapefile loaded! Found {len(st.session_state.field_options)} unique sections.")
+# Load data only once
+if not st.session_state.data_loaded:
+    with st.spinner("Loading field data from GitHub..."):
+        gdf = load_data_from_github(SHAPEFILE_URL)
+        if gdf is not None:
+            st.session_state.gdf = gdf
+            # Check for the required 'Section' column
+            if "Section" in gdf.columns:
+                # Get unique, sorted list of sections
+                st.session_state.field_options = sorted(gdf["Section"].unique().tolist())
+                st.sidebar.success(f"Shapefile loaded! Found {len(st.session_state.field_options)} unique sections.")
+            else:
+                st.sidebar.error("Shapefile is missing the required 'Section' column.")
+                st.session_state.field_options = []
         else:
-            st.sidebar.error("Shapefile is missing the required 'Section' column.")
-            st.session_state.field_options = [] # Reset options if column is missing
+            st.sidebar.error("Failed to load shapefile from GitHub. Please check the URL and file format.")
+    st.session_state.data_loaded = True
+
 
 # --- Data Entry Section ---
 # Only show the data entry options if a valid shapefile has been loaded
 if not st.session_state.field_options:
-    st.warning("Please upload a valid shapefile in the sidebar to begin data entry.")
+    st.warning("Could not load field data. Please check the configuration.")
 else:
     data_type = st.selectbox(
         "Select Data Type to Enter",
