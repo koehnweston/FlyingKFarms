@@ -33,7 +33,7 @@ def load_data_from_github(url):
             tmp.write(response.content)
             tmp_path = tmp.name
 
-        # NEW: Inspect the zip file to find the shapefile name dynamically
+        # Inspect the zip file to find the shapefile name dynamically
         with zipfile.ZipFile(tmp_path, 'r') as zf:
             # Find the first file ending with .shp (case-insensitive)
             shapefile_name = next((name for name in zf.namelist() if name.lower().endswith('.shp')), None)
@@ -43,8 +43,6 @@ def load_data_from_github(url):
                 return None
         
         # Construct the specific URI for geopandas to read the file from within the zip
-        # The syntax is "zip://path/to/file.zip!layer_name"
-        # The layer_name is the shapefile name itself (e.g., 'Parcels_2.shp')
         uri = f"zip://{tmp_path}!{shapefile_name}"
         gdf = gpd.read_file(uri)
         return gdf
@@ -87,14 +85,30 @@ if not st.session_state.data_loaded:
     with st.spinner("Loading field data from GitHub..."):
         gdf = load_data_from_github(SHAPEFILE_URL)
         if gdf is not None:
+            # --- Normalize column names to be case-insensitive ---
+            column_map = {col.lower(): col for col in gdf.columns}
+            if 'section' in column_map:
+                gdf.rename(columns={column_map['section']: 'Section'}, inplace=True)
+            if 'area' in column_map:
+                 gdf.rename(columns={column_map['area']: 'Area'}, inplace=True)
+
+            # --- NEW: Dynamically calculate X and Y from geometry ---
+            # Ensure the geometry column is valid before calculating centroids
+            if 'geometry' in gdf.columns and not gdf.empty:
+                # Calculate the centroid of each polygon
+                centroids = gdf.geometry.centroid
+                # Add X and Y columns to the dataframe
+                gdf['X'] = centroids.x
+                gdf['Y'] = centroids.y
+            
             st.session_state.gdf = gdf
-            # Check for the required 'Section' column
+            
+            # Check for the required 'Section' column after standardization
             if "Section" in gdf.columns:
                 # Get unique, sorted list of sections
                 st.session_state.field_options = sorted(gdf["Section"].unique().tolist())
                 st.sidebar.success(f"Shapefile loaded! Found {len(st.session_state.field_options)} unique sections.")
             else:
-                # ENHANCED ERROR: Show which columns were found
                 st.sidebar.error("Shapefile is missing the required 'Section' column.")
                 st.sidebar.warning(f"Columns found: {gdf.columns.tolist()}")
                 st.session_state.field_options = []
@@ -124,7 +138,7 @@ else:
             selected_section = st.selectbox("Select Field Section", options=st.session_state.field_options, index=0)
 
             # Display X, Y, and Area for the selected section
-            if selected_section:
+            if selected_section and st.session_state.gdf is not None:
                 section_data = st.session_state.gdf[st.session_state.gdf["Section"] == selected_section].iloc[0]
                 col1, col2, col3 = st.columns(3)
                 with col1:
