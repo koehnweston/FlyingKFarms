@@ -10,6 +10,7 @@ import os
 
 # --- Page Configuration ---
 # Set the layout to wide for better form visibility
+# Force a redeploy to clear cache
 st.set_page_config(page_title="Farming Data Entry", page_icon="🌾", layout="wide")
 
 # --- Data Loading ---
@@ -172,4 +173,5 @@ else:
             "units": (st.text_input, ["Units (e.g., bushels, lbs, tons)"], {})
         }
         data_entry_form("yield_form", fields)
+
 
