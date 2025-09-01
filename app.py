@@ -9,6 +9,7 @@ import tempfile
 import os
 import folium
 from streamlit_folium import st_folium
+import json
 
 # --- Page Configuration ---
 # Set the layout to wide for better form visibility
@@ -63,7 +64,11 @@ def fetch_openet_data(_geometry, start_date, end_date, api_key):
     Fetches time series data from the OpenET API for a given geometry.
     """
     API_URL = "https://openet-api.org/v2/timeseries/geometry"
-    headers = {"Authorization": api_key}
+    # Explicitly set content type and include Authorization
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": api_key
+    }
     geom_geojson = _geometry.__geo_interface__
     
     payload = {
@@ -83,7 +88,7 @@ def fetch_openet_data(_geometry, start_date, end_date, api_key):
         df['date'] = pd.to_datetime(df['time'])
         df.set_index('date', inplace=True)
         
-        # Rename columns for clarity, handling potential name variations
+        # Rename columns for clarity
         rename_map = {col: 'ET (mm)' for col in df.columns if 'et_ensemble' in col}
         rename_map.update({col: 'NDVI' for col in df.columns if 'ndvi_ensemble' in col})
         df.rename(columns=rename_map, inplace=True)
@@ -91,8 +96,13 @@ def fetch_openet_data(_geometry, start_date, end_date, api_key):
         return df[['ET (mm)', 'NDVI']]
         
     except requests.exceptions.RequestException as e:
-        st.error(f"OpenET API Error: {e}")
-        st.error(f"Response content: {e.response.text if e.response else 'No response'}")
+        # Provide more specific feedback for 404 errors
+        if e.response.status_code == 404:
+            st.error("OpenET API Error: 404 Not Found.")
+            st.warning("This commonly occurs if the selected field's location is outside of OpenET's coverage area (primarily the Western US).")
+        else:
+            st.error(f"OpenET API Error: {e}")
+            st.error(f"Response content: {e.response.text if e.response else 'No response'}")
         return None
 
 # --- Main App ---
@@ -222,7 +232,9 @@ else:
         with st.form(form_key_map[data_type]):
             st.subheader("Data Details")
             columns = st.columns(2)
-            for i, (name, (func, args, kwargs)) in enumerate(fields_map[data_type].items()):
+            # Create a list of the dictionary's items to ensure consistent order
+            field_items = list(fields_map[data_type].items())
+            for i, (name, (func, args, kwargs)) in enumerate(field_items):
                 with columns[i % 2]:
                     func(*args, **kwargs)
             st.text_area("Notes")
