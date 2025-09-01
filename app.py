@@ -10,7 +10,6 @@ import os
 
 # --- Page Configuration ---
 # Set the layout to wide for better form visibility
-# Force a redeploy to clear cache
 st.set_page_config(page_title="Farming Data Entry", page_icon="🌾", layout="wide")
 
 # --- Data Loading ---
@@ -19,7 +18,10 @@ SHAPEFILE_URL = "https://raw.githubusercontent.com/koehnweston/FlyingKFarms/main
 
 @st.cache_data
 def load_data_from_github(url):
-    """Loads a zipped shapefile from a GitHub raw URL by saving to a temporary file."""
+    """
+    Loads a zipped shapefile from a GitHub raw URL.
+    This version dynamically finds the .shp file within the zip archive.
+    """
     tmp_path = None
     try:
         response = requests.get(url)
@@ -31,8 +33,20 @@ def load_data_from_github(url):
             tmp.write(response.content)
             tmp_path = tmp.name
 
-        # Geopandas reads the zip file directly from the temp path
-        gdf = gpd.read_file(tmp_path)
+        # NEW: Inspect the zip file to find the shapefile name dynamically
+        with zipfile.ZipFile(tmp_path, 'r') as zf:
+            # Find the first file ending with .shp (case-insensitive)
+            shapefile_name = next((name for name in zf.namelist() if name.lower().endswith('.shp')), None)
+            
+            if not shapefile_name:
+                st.error("Error: No .shp file found inside the zip archive.")
+                return None
+        
+        # Construct the specific URI for geopandas to read the file from within the zip
+        # The syntax is "zip://path/to/file.zip!layer_name"
+        # The layer_name is the shapefile name itself (e.g., 'Parcels_2.shp')
+        uri = f"zip://{tmp_path}!{shapefile_name}"
+        gdf = gpd.read_file(uri)
         return gdf
         
     except requests.exceptions.RequestException as e:
@@ -50,11 +64,17 @@ def load_data_from_github(url):
 # --- Main App ---
 st.markdown("# 🌾 Farming Data Entry")
 
-# --- Sidebar for File Upload and Instructions ---
+# --- Sidebar ---
 st.sidebar.header("Field Setup")
 st.sidebar.info(
     "Field data is automatically loaded from the `parcels_2.zip` file in the GitHub repository."
 )
+
+# Add a button to clear the cache and rerun the data loading
+if st.sidebar.button("Clear Cache & Reload Data"):
+    st.cache_data.clear()
+    st.session_state.data_loaded = False
+    st.rerun()
 
 # Initialize session state if not already done
 if 'data_loaded' not in st.session_state:
@@ -74,7 +94,9 @@ if not st.session_state.data_loaded:
                 st.session_state.field_options = sorted(gdf["Section"].unique().tolist())
                 st.sidebar.success(f"Shapefile loaded! Found {len(st.session_state.field_options)} unique sections.")
             else:
+                # ENHANCED ERROR: Show which columns were found
                 st.sidebar.error("Shapefile is missing the required 'Section' column.")
+                st.sidebar.warning(f"Columns found: {gdf.columns.tolist()}")
                 st.session_state.field_options = []
         else:
             st.sidebar.error("Failed to load shapefile from GitHub. Please check the URL and file format.")
@@ -84,7 +106,7 @@ if not st.session_state.data_loaded:
 # --- Data Entry Section ---
 # Only show the data entry options if a valid shapefile has been loaded
 if not st.session_state.field_options:
-    st.warning("Could not load field data. Please check the configuration.")
+    st.warning("Could not load field data. Please check the configuration in the sidebar.")
 else:
     data_type = st.selectbox(
         "Select Data Type to Enter",
@@ -95,7 +117,6 @@ else:
     st.markdown(f"### Enter {data_type}")
 
     # --- Reusable Form Component ---
-    # We create a function to avoid repeating the form logic
     def data_entry_form(form_key, fields):
         with st.form(form_key):
             # First, create the section selector and display its info
@@ -128,7 +149,6 @@ else:
             if submitted:
                 st.success(f"{data_type} for section '{selected_section}' submitted successfully!")
                 # In a real app, you would save this data to a database.
-                # Example of data to be saved:
                 # data_to_save = {"section": selected_section, "notes": notes, **form_inputs}
                 # st.write(data_to_save)
 
@@ -173,5 +193,4 @@ else:
             "units": (st.text_input, ["Units (e.g., bushels, lbs, tons)"], {})
         }
         data_entry_form("yield_form", fields)
-
 
