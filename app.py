@@ -23,21 +23,37 @@ OPENET_API_KEY = st.secrets.get("OPENET_API_KEY")
 SHAPEFILE_URL = "https://raw.githubusercontent.com/koehnweston/FlyingKFarms/main/parcels_2.zip"
 
 @st.cache_data
-@st.cache_data
 def load_data_from_github(url):
-    # ... (code to fetch and unzip the shapefile) ...
-    
-    uri = f"zip://{tmp_path}!{shapefile_name}"
-    gdf = gpd.read_file(uri)
-    
-    # FIX: Manually assign the known source CRS (KS State Plane)
-    if gdf.crs is None:
-        gdf.set_crs(epsg=2241, inplace=True) 
-    
-    # Convert from State Plane to the latitude/longitude the API needs
-    gdf = gdf.to_crs(epsg=4326) 
-    
-    return gdf
+    """
+    Loads, processes, and re-projects a zipped shapefile from a GitHub URL.
+    """
+    tmp_path = None
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+        
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".zip") as tmp:
+            tmp.write(response.content)
+            tmp_path = tmp.name
+
+        with zipfile.ZipFile(tmp_path, 'r') as zf:
+            shapefile_name = next((name for name in zf.namelist() if name.lower().endswith('.shp')), None)
+            if not shapefile_name:
+                st.error("Error: No .shp file found inside the zip archive.")
+                return None
+        
+        uri = f"zip://{tmp_path}!{shapefile_name}"
+        gdf = gpd.read_file(uri)
+        
+        # FIX: Manually assign the known source CRS if it's missing
+        if gdf.crs is None:
+            st.info("Shapefile CRS not found. Assuming KS State Plane North (EPSG:2241).")
+            gdf.set_crs(epsg=2241, inplace=True)
+        
+        # Convert from State Plane to the latitude/longitude the API needs
+        gdf = gdf.to_crs(epsg=4326)
+        
+        return gdf
         
     except requests.exceptions.RequestException as e:
         st.error(f"Error fetching data from URL: {e}")
@@ -126,7 +142,7 @@ if 'data_loaded' not in st.session_state:
             if 'section' in column_map:
                 gdf.rename(columns={column_map['section']: 'Section'}, inplace=True)
             if 'area' in column_map:
-                 gdf.rename(columns={column_map['area']: 'Area'}, inplace=True)
+                gdf.rename(columns={column_map['area']: 'Area'}, inplace=True)
 
             if 'geometry' in gdf.columns and not gdf.empty:
                 centroids = gdf.geometry.centroid
@@ -204,16 +220,16 @@ else:
                         if f'openet_{selected_section}' in st.session_state:
                             del st.session_state[f'openet_{selected_section}']
         
-        if st.session_state.get(f'openet_{selected_section}') is not None:
-            st.markdown("---")
-            st.subheader(f"OpenET Data for Section: {selected_section}")
-            df_to_show = st.session_state[f'openet_{selected_section}']
-            st.markdown("##### Evapotranspiration (ET)")
-            st.line_chart(df_to_show['ET (mm)'])
-            st.markdown("##### Normalized Difference Vegetation Index (NDVI)")
-            st.line_chart(df_to_show['NDVI'])
-            st.markdown("##### Raw Data")
-            st.dataframe(df_to_show)
+    if st.session_state.get(f'openet_{selected_section}') is not None:
+        st.markdown("---")
+        st.subheader(f"OpenET Data for Section: {selected_section}")
+        df_to_show = st.session_state[f'openet_{selected_section}']
+        st.markdown("##### Evapotranspiration (ET)")
+        st.line_chart(df_to_show['ET (mm)'])
+        st.markdown("##### Normalized Difference Vegetation Index (NDVI)")
+        st.line_chart(df_to_show['NDVI'])
+        st.markdown("##### Raw Data")
+        st.dataframe(df_to_show)
 
     else: # Handle all other data entry forms
         form_key_map = {
@@ -240,4 +256,3 @@ else:
             st.text_area("Notes")
             if st.form_submit_button(f"Submit {data_type}"):
                 st.success(f"{data_type} for '{selected_section}' submitted!")
-
