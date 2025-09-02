@@ -23,30 +23,21 @@ OPENET_API_KEY = st.secrets.get("OPENET_API_KEY")
 SHAPEFILE_URL = "https://raw.githubusercontent.com/koehnweston/FlyingKFarms/main/parcels_2.zip"
 
 @st.cache_data
+@st.cache_data
 def load_data_from_github(url):
-    """
-    Loads, processes, and re-projects a zipped shapefile from a GitHub URL.
-    """
-    tmp_path = None
-    try:
-        response = requests.get(url)
-        response.raise_for_status()
-        
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".zip") as tmp:
-            tmp.write(response.content)
-            tmp_path = tmp.name
-
-        with zipfile.ZipFile(tmp_path, 'r') as zf:
-            shapefile_name = next((name for name in zf.namelist() if name.lower().endswith('.shp')), None)
-            if not shapefile_name:
-                st.error("Error: No .shp file found inside the zip archive.")
-                return None
-        
-        uri = f"zip://{tmp_path}!{shapefile_name}"
-        gdf = gpd.read_file(uri)
-        
-        gdf = gdf.to_crs(epsg=4326)
-        return gdf
+    # ... (code to fetch and unzip the shapefile) ...
+    
+    uri = f"zip://{tmp_path}!{shapefile_name}"
+    gdf = gpd.read_file(uri)
+    
+    # FIX: Manually assign the known source CRS (KS State Plane)
+    if gdf.crs is None:
+        gdf.set_crs(epsg=2241, inplace=True) 
+    
+    # Convert from State Plane to the latitude/longitude the API needs
+    gdf = gdf.to_crs(epsg=4326) 
+    
+    return gdf
         
     except requests.exceptions.RequestException as e:
         st.error(f"Error fetching data from URL: {e}")
