@@ -86,8 +86,8 @@ def fetch_openet_data(_geometry, start_date, end_date, api_key):
         ],
         "file_format": "JSON",
         "geometry": [
-            _geometry.centroid.x,
-            _geometry.centroid.y
+            _geometry.centroid.x,  # Longitude
+            _geometry.centroid.y   # Latitude
         ],
         "interval": "monthly",
         "model": "Ensemble",
@@ -110,12 +110,12 @@ def fetch_openet_data(_geometry, start_date, end_date, api_key):
         response.raise_for_status()
         
         data = response.json()
-        
-        # CHANGED: The API returns a list directly, not a dict with a 'timeseries' key.
-        # We pass the entire 'data' object to the DataFrame constructor.
         df = pd.DataFrame(data)
         
-        df['date'] = pd.to_datetime(df['date'])
+        # Use the 'time' column from the API to create the 'date' column.
+        df['date'] = pd.to_datetime(df['time'])
+        
+        # This line now works because the 'date' column was created above.
         df.set_index('date', inplace=True)
         
         df.rename(columns={'ET': 'ET (mm)'}, inplace=True)
