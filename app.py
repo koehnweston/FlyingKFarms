@@ -64,7 +64,7 @@ def load_data_from_github(url):
 @st.cache_data
 def fetch_openet_data(_geometry, start_date, end_date, api_key):
     """
-    Fetches time series data from the OpenET API for a single point (centroid)
+    Fetches time series data (ET and NDVI) from the OpenET API for a single point (centroid)
     using the /raster/timeseries/point endpoint.
     """
     API_URL = "https://openet-api.org/raster/timeseries/point"
@@ -85,11 +85,12 @@ def fetch_openet_data(_geometry, start_date, end_date, api_key):
             _geometry.centroid.x,  # Longitude
             _geometry.centroid.y   # Latitude
         ],
-        "interval": "daily",      # CHANGED: Switched to daily data download
+        "interval": "daily",
         "model": "Ensemble",
         "reference_et": "gridMET",
-        "units": "in",
-        "variable": "ET"
+        "units": "mm",
+        # MODIFIED: Request both ET and NDVI variables
+        "variable": ["ET", "NDVI"]
     }
 
     try:
@@ -99,15 +100,20 @@ def fetch_openet_data(_geometry, start_date, end_date, api_key):
         data = response.json()
         df = pd.DataFrame(data)
         
-        # Use the correct column name 'time'
+        # Use the correct column name 'time' and set it as the index
         df['date'] = pd.to_datetime(df['time'])
-        
         df.set_index('date', inplace=True)
         
-        # Rename the correct column 'et' to what the chart expects
-        df.rename(columns={'et': 'ET (in)'}, inplace=True)
+        # MODIFIED: Rename columns for clarity in charts and tables
+        rename_map = {}
+        if 'et' in df.columns:
+            rename_map['et'] = 'ET (mm)'
+        if 'ndvi' in df.columns:
+            rename_map['ndvi'] = 'NDVI'
+        df.rename(columns=rename_map, inplace=True)
         
-        return df[['ET (in)']]
+        # Return only the columns that were successfully fetched and renamed
+        return df[list(rename_map.values())]
         
     except requests.exceptions.RequestException as e:
         st.error(f"OpenET API Error: {e}")
@@ -209,7 +215,7 @@ else:
             st.error("OpenET API key not configured.")
             st.info("""
                 To use this feature, add your OpenET API key to Streamlit's secrets.
-                1. Go to your app's dashboard on Streamlit Coinunity Cloud.
+                1. Go to your app's dashboard on Streamlit Community Cloud.
                 2. Click on 'Settings' > 'Secrets'.
                 3. Add a secret with the key `OPENET_API_KEY` and your API token as the value.
                 For example: `OPENET_API_KEY = "your-key-here"`
@@ -233,12 +239,22 @@ else:
                         if f'openet_{selected_section}' in st.session_state:
                             del st.session_state[f'openet_{selected_section}']
     
+    # MODIFIED: Display logic for both ET and NDVI charts
     if st.session_state.get(f'openet_{selected_section}') is not None:
         st.markdown("---")
         st.subheader(f"OpenET Data for Section: {selected_section}")
         df_to_show = st.session_state[f'openet_{selected_section}']
-        st.markdown("##### Evapotranspiration (ET)")
-        st.line_chart(df_to_show['ET (in)'])
+        
+        # Display ET Chart if data is available
+        if 'ET (mm)' in df_to_show.columns:
+            st.markdown("##### Evapotranspiration (ET)")
+            st.line_chart(df_to_show['ET (mm)'])
+        
+        # Display NDVI Chart if data is available
+        if 'NDVI' in df_to_show.columns:
+            st.markdown("##### Normalized Difference Vegetation Index (NDVI)")
+            st.line_chart(df_to_show['NDVI'])
+        
         st.markdown("##### Raw Data")
         st.dataframe(df_to_show)
 
