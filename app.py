@@ -65,20 +65,23 @@ def load_data_from_github(url):
         if tmp_path and os.path.exists(tmp_path):
             os.unlink(tmp_path)
 
+
 @st.cache_data
 def fetch_openet_data(_geometry, start_date, end_date, api_key):
     """
-    Fetches time series data from the OpenET API for a given geometry.
+    Fetches time series data from the OpenET API for a single point (centroid).
     """
-    API_URL = "https://openet-api.org/v2/timeseries/geometry"
+    # 1. CHANGE: Update the API endpoint URL for a point query
+    API_URL = "https://openet-api.org/v2/timeseries/point"
     headers = {
         "Content-Type": "application/json",
         "Authorization": api_key
     }
-    geom_geojson = _geometry.__geo_interface__
     
+    # 2. CHANGE: Restructure the payload to use latitude and longitude from the centroid
     payload = {
-        "geometry": geom_geojson,
+        "latitude": _geometry.centroid.y,
+        "longitude": _geometry.centroid.x,
         "start_date": start_date.strftime("%Y-%m-%d"),
         "end_date": end_date.strftime("%Y-%m-%d"),
         "model": "ensemble",
@@ -103,6 +106,21 @@ def fetch_openet_data(_geometry, start_date, end_date, api_key):
         df.rename(columns=rename_map, inplace=True)
         
         return df[['ET (mm)', 'NDVI']]
+        
+    except requests.exceptions.RequestException as e:
+        if e.response and e.response.status_code == 404:
+            st.error("OpenET API Error: 404 Not Found.")
+            st.warning("""
+                This can occur for a few reasons:
+                1.  **API Key:** The API key in your Streamlit secrets might be invalid or expired. Please double-check it.
+                2.  **Location:** The selected point might be outside OpenET's coverage area.
+                
+                Enable "Debug Mode" in the sidebar to view the exact data payload sent to the API.
+            """)
+        else:
+            st.error(f"OpenET API Error: {e}")
+            st.error(f"Response content: {e.response.text if e.response else 'No response'}")
+        return None
         
     except requests.exceptions.RequestException as e:
         if e.response and e.response.status_code == 404:
