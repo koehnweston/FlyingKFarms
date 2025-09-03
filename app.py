@@ -71,16 +71,14 @@ def fetch_openet_data(_geometry, start_date, end_date, api_key):
     Fetches time series data from the OpenET API for a single point (centroid)
     using the /raster/timeseries/point endpoint.
     """
-    # CHANGED: Updated API_URL to match the working script
     API_URL = "https://openet-api.org/raster/timeseries/point"
     
     headers = {
-        "accept": "application/json", # ADDED: To match working script
+        "accept": "application/json",
         "Content-Type": "application/json",
         "Authorization": api_key
     }
     
-    # CHANGED: Re-structured the payload to match the /raster endpoint
     payload = {
         "date_range": [
             start_date.strftime("%Y-%m-%d"),
@@ -88,17 +86,16 @@ def fetch_openet_data(_geometry, start_date, end_date, api_key):
         ],
         "file_format": "JSON",
         "geometry": [
-            _geometry.centroid.x,  # Longitude
-            _geometry.centroid.y   # Latitude
+            _geometry.centroid.x,
+            _geometry.centroid.y
         ],
-        "interval": "monthly",    # ADDED: Hardcoded to match working script
-        "model": "Ensemble",      # ADDED: Capitalized to match
-        "reference_et": "gridMET",# ADDED: To match working script
-        "units": "mm",            # ADDED: To match working script
-        "variable": "ET"          # ADDED: Capitalized & not in a list
+        "interval": "monthly",
+        "model": "Ensemble",
+        "reference_et": "gridMET",
+        "units": "mm",
+        "variable": "ET"
     }
 
-    # Debugging output remains the same
     if st.session_state.get("debug_mode", False):
         st.sidebar.subheader("API Request Details")
         st.sidebar.write("**URL:**")
@@ -112,28 +109,24 @@ def fetch_openet_data(_geometry, start_date, end_date, api_key):
         response = requests.post(API_URL, headers=headers, json=payload)
         response.raise_for_status()
         
-        # CHANGED: Process JSON response instead of CSV
         data = response.json()
         
-        # The data comes in a 'timeseries' list of dicts
-        df = pd.DataFrame(data['timeseries'])
+        # CHANGED: The API returns a list directly, not a dict with a 'timeseries' key.
+        # We pass the entire 'data' object to the DataFrame constructor.
+        df = pd.DataFrame(data)
         
         df['date'] = pd.to_datetime(df['date'])
         df.set_index('date', inplace=True)
         
-        # The column name is 'ET', rename it to what the app expects
         df.rename(columns={'ET': 'ET (mm)'}, inplace=True)
         
-        # Return only the expected column
         return df[['ET (mm)']]
         
     except requests.exceptions.RequestException as e:
-        # Error handling remains largely the same
         st.error(f"OpenET API Error: {e}")
         if e.response:
             st.error(f"Status Code: {e.response.status_code}")
             try:
-                # Try to pretty-print JSON error details
                 st.json(e.response.json())
             except json.JSONDecodeError:
                 st.text(e.response.text)
