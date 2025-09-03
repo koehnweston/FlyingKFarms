@@ -96,15 +96,6 @@ def fetch_openet_data(_geometry, start_date, end_date, api_key):
         "variable": "ET"
     }
 
-    if st.session_state.get("debug_mode", False):
-        st.sidebar.subheader("API Request Details")
-        st.sidebar.write("**URL:**")
-        st.sidebar.code(API_URL, language="text")
-        st.sidebar.write("**Headers:**")
-        st.sidebar.json(headers)
-        st.sidebar.write("**Payload:**")
-        st.sidebar.json(payload)
-
     try:
         response = requests.post(API_URL, headers=headers, json=payload)
         response.raise_for_status()
@@ -112,10 +103,10 @@ def fetch_openet_data(_geometry, start_date, end_date, api_key):
         data = response.json()
         df = pd.DataFrame(data)
         
-        # Use the 'time' column from the API to create the 'date' column.
-        df['date'] = pd.to_datetime(df['time'])
+        # FINAL FIX: Replace 'YOUR_DATE_COLUMN_NAME' with the actual column
+        # name you found in the debugging step above.
+        df['date'] = pd.to_datetime(df['YOUR_DATE_COLUMN_NAME'])
         
-        # This line now works because the 'date' column was created above.
         df.set_index('date', inplace=True)
         
         df.rename(columns={'ET': 'ET (mm)'}, inplace=True)
