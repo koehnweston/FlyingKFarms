@@ -228,8 +228,17 @@ else:
         st.subheader(f"OpenET Data for Section: {selected_section}")
         df_to_show = st.session_state[f'openet_{selected_section}']
         
-        st.markdown("##### Evapotranspiration (ET)")
-        st.line_chart(df_to_show['ET (in)'])
+        # Calculate cumulative sum
+        df_to_show['Cumulative ET (in)'] = df_to_show['ET (in)'].cumsum()
+        
+        # Display charts side-by-side
+        plot1, plot2 = st.columns(2)
+        with plot1:
+            st.markdown("##### Daily Evapotranspiration (ET)")
+            st.line_chart(df_to_show['ET (in)'])
+        with plot2:
+            st.markdown("##### Cumulative Water Use (ET)")
+            st.line_chart(df_to_show['Cumulative ET (in)'])
         
         st.markdown("##### Raw Data")
         st.dataframe(df_to_show)
