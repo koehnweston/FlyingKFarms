@@ -10,8 +10,6 @@ import os
 import folium
 from streamlit_folium import st_folium
 import json
-import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
 
 # --- Page Configuration ---
 st.set_page_config(page_title="Farming Data Entry", page_icon="🌾", layout="wide")
@@ -53,33 +51,15 @@ def load_data_from_github(url):
         if tmp_path and os.path.exists(tmp_path):
             os.unlink(tmp_path)
 
-def make_openet_api_call(payload, api_key):
-    """
-    A generic function to make a POST request to the OpenET API.
-    """
+@st.cache_data
+def fetch_et_data(_geometry, start_date, end_date, api_key):
+    """Fetches daily ET data in inches."""
     API_URL = "https://openet-api.org/raster/timeseries/point"
     headers = {
         "accept": "application/json",
         "Content-Type": "application/json",
         "Authorization": api_key
     }
-    try:
-        response = requests.post(API_URL, headers=headers, json=payload)
-        response.raise_for_status()
-        return response.json()
-    except requests.exceptions.RequestException as e:
-        st.error(f"OpenET API Error for variable {payload.get('variable')}: {e}")
-        if e.response:
-            st.error(f"Status Code: {e.response.status_code}")
-            try:
-                st.json(e.response.json())
-            except json.JSONDecodeError:
-                st.text(e.response.text)
-        return None
-
-@st.cache_data
-def fetch_et_data(_geometry, start_date, end_date, api_key):
-    """Fetches daily ET data in inches."""
     payload = {
         "date_range": [start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")],
         "geometry": [_geometry.centroid.x, _geometry.centroid.y],
@@ -87,34 +67,26 @@ def fetch_et_data(_geometry, start_date, end_date, api_key):
         "model": "Ensemble",
         "reference_et": "gridMET",
         "variable": "ET",
-        "units": "inches" # CHANGED
+        "units": "inches"
     }
-    data = make_openet_api_call(payload, api_key)
-    if data:
-        df = pd.DataFrame(data)
-        df['date'] = pd.to_datetime(df['time'])
-        df.set_index('date', inplace=True)
-        df.rename(columns={'et': 'ET (in)'}, inplace=True)
-        return df[['ET (in)']]
-    return None
-
-@st.cache_data
-def fetch_ndvi_data(_geometry, start_date, end_date, api_key):
-    """Fetches daily NDVI data."""
-    payload = {
-        "date_range": [start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")],
-        "geometry": [_geometry.centroid.x, _geometry.centroid.y],
-        "interval": "daily",
-        "model": "landsat",
-        "variable": "NDVI" # CHANGED
-    }
-    data = make_openet_api_call(payload, api_key)
-    if data:
-        df = pd.DataFrame(data)
-        df['date'] = pd.to_datetime(df['time'])
-        df.set_index('date', inplace=True)
-        df.rename(columns={'ndvi': 'NDVI'}, inplace=True)
-        return df[['NDVI']]
+    try:
+        response = requests.post(API_URL, headers=headers, json=payload)
+        response.raise_for_status()
+        data = response.json()
+        if data:
+            df = pd.DataFrame(data)
+            df['date'] = pd.to_datetime(df['time'])
+            df.set_index('date', inplace=True)
+            df.rename(columns={'et': 'ET (in)'}, inplace=True)
+            return df[['ET (in)']]
+    except requests.exceptions.RequestException as e:
+        st.error(f"OpenET API Error: {e}")
+        if e.response:
+            st.error(f"Status Code: {e.response.status_code}")
+            try:
+                st.json(e.response.json())
+            except json.JSONDecodeError:
+                st.text(e.response.text)
     return None
 
 # --- Main App ---
@@ -123,7 +95,6 @@ st.markdown("# 🌾 Farming Data Entry")
 # --- Sidebar ---
 st.sidebar.header("Field Setup")
 st.sidebar.info("Field data is automatically loaded from GitHub.")
-st.session_state.debug_mode = st.sidebar.checkbox("Enable Debug Mode")
 if st.sidebar.button("Clear Cache & Reload Data"):
     st.cache_data.clear()
     st.session_state.clear()
@@ -193,61 +164,34 @@ else:
 
             if start_date > end_date:
                 st.warning("Start date cannot be after end date.")
-            elif st.button("Fetch ET and NDVI Data"):
-                with st.spinner(f"Fetching data for '{selected_section}'..."):
+            elif st.button("Fetch ET Data"): # CHANGED Button text
+                with st.spinner(f"Fetching ET data for '{selected_section}'..."):
                     et_df = fetch_et_data(section_data.geometry, start_date, end_date, OPENET_API_KEY)
-                    ndvi_df = fetch_ndvi_data(section_data.geometry, start_date, end_date, OPENET_API_KEY)
 
-                    if et_df is not None and ndvi_df is not None:
-                        # Merge the two dataframes on their date index
-                        combined_df = pd.merge(et_df, ndvi_df, left_index=True, right_index=True)
-                        st.session_state[f'openet_{selected_section}'] = combined_df
+                    if et_df is not None: # SIMPLIFIED Logic
+                        st.session_state[f'openet_{selected_section}'] = et_df
                     else:
-                        st.warning("Could not retrieve complete data from OpenET.")
+                        st.warning("Could not retrieve data from OpenET.")
                         if f'openet_{selected_section}' in st.session_state:
                             del st.session_state[f'openet_{selected_section}']
-    
+
     # --- Plotting and Data Display ---
     if st.session_state.get(f'openet_{selected_section}') is not None:
         st.markdown("---")
         st.subheader(f"OpenET Data for Section: {selected_section}")
         df_to_show = st.session_state[f'openet_{selected_section}']
 
-        # Create the dual-axis plot
-        fig, ax1 = plt.subplots(figsize=(12, 6))
-
-        # Plot ET on the primary y-axis (left)
-        color = 'tab:blue'
-        ax1.set_xlabel('Date')
-        ax1.set_ylabel('ET (in)', color=color)
-        ax1.plot(df_to_show.index, df_to_show['ET (in)'], color=color, label='ET (in)')
-        ax1.tick_params(axis='y', labelcolor=color)
-
-        # Create a second y-axis that shares the same x-axis
-        ax2 = ax1.twinx()
-        color = 'tab:green'
-        ax2.set_ylabel('NDVI', color=color)
-        ax2.plot(df_to_show.index, df_to_show['NDVI'], color=color, linestyle='--', label='NDVI')
-        ax2.tick_params(axis='y', labelcolor=color)
-        
-        # Formatting
-        ax1.set_title('Daily Evapotranspiration (ET) and NDVI')
-        ax1.grid(True)
-        fig.tight_layout()
-        ax1.xaxis.set_major_formatter(mdates.DateFormatter('%b %Y'))
-        plt.setp(ax1.get_xticklabels(), rotation=45, ha="right")
-
-        st.pyplot(fig)
+        st.markdown("##### Daily Evapotranspiration (ET)")
+        st.line_chart(df_to_show['ET (in)']) # SIMPLIFIED Plot
 
         st.markdown("##### Raw Data")
         st.dataframe(df_to_show)
 
     # --- Other Data Entry Forms ---
-    # (This section is unchanged)
     form_key_map = { "Water Usage": "water_form", "Crop Data": "crop_form", "Soil Data": "soil_form", "Fertilizer Data": "fertilizer_form", "Yield Data": "yield_form" }
     fields_map = { "Water Usage": {"date": (st.date_input, ["Date"], {"value": date.today()}), "water_gallons": (st.number_input, ["Water Used (Gallons)"], {"min_value": 0.0, "format": "%.2f"}), "source": (st.selectbox, ["Water Source"], {"options": ["Well", "River", "Canal", "Municipal"]})}, "Crop Data": {"planting_date": (st.date_input, ["Planting Date"], {"value": date.today()}), "crop_type": (st.selectbox, ["Crop Type"], {"options": ["Corn", "Soybeans", "Wheat", "Cotton", "Other"]}), "acres_planted": (st.number_input, ["Acres Planted"], {"min_value": 0.0, "format": "%.2f"})}, "Soil Data": {"sample_date": (st.date_input, ["Sample Date"], {"value": date.today()}), "ph_level": (st.number_input, ["pH Level"], {"min_value": 0.0, "max_value": 14.0, "format": "%.1f"}), "organic_matter": (st.number_input, ["Organic Matter (%)"], {"min_value": 0.0, "format": "%.2f"})}, "Fertilizer Data": {"application_date": (st.date_input, ["Application Date"], {"value": date.today()}), "fertilizer_type": (st.text_input, ["Fertilizer Type"], {}), "amount_applied": (st.number_input, ["Amount Applied (lbs/acre)"], {"min_value": 0.0, "format": "%.2f"})}, "Yield Data": {"harvest_date": (st.date_input, ["Harvest Date"], {"value": date.today()}), "total_yield": (st.number_input, ["Total Yield"], {"min_value": 0.0, "format": "%.2f"}), "units": (st.text_input, ["Units (e.g., bushels)"], {})} }
 
-    if data_type in form_key_map: 
+    if data_type in form_key_map:
         with st.form(form_key_map[data_type]):
             st.subheader("Data Details")
             columns = st.columns(2)
