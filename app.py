@@ -191,6 +191,21 @@ else:
 
     st.markdown(f"### Enter {data_type}")
 
+    # DEFINE DICTIONARIES BEFORE THE IF/ELIF BLOCK THAT USES THEM
+    form_key_map = {
+        "Water Usage": "water_form", "Crop Data": "crop_form",
+        "Soil Data": "soil_form", "Fertilizer Data": "fertilizer_form",
+        "Yield Data": "yield_form"
+    }
+    
+    fields_map = {
+        "Water Usage": {"date": (st.date_input, ["Date"], {"value": date.today()}), "water_gallons": (st.number_input, ["Water Used (Gallons)"], {"min_value": 0.0, "format": "%.2f"}), "source": (st.selectbox, ["Water Source"], {"options": ["Well", "River", "Canal", "Municipal"]})},
+        "Crop Data": {"planting_date": (st.date_input, ["Planting Date"], {"value": date.today()}), "crop_type": (st.selectbox, ["Crop Type"], {"options": ["Corn", "Soybeans", "Wheat", "Cotton", "Other"]}), "acres_planted": (st.number_input, ["Acres Planted"], {"min_value": 0.0, "format": "%.2f"})},
+        "Soil Data": {"sample_date": (st.date_input, ["Sample Date"], {"value": date.today()}), "ph_level": (st.number_input, ["pH Level"], {"min_value": 0.0, "max_value": 14.0, "format": "%.1f"}), "organic_matter": (st.number_input, ["Organic Matter (%)"], {"min_value": 0.0, "format": "%.2f"})},
+        "Fertilizer Data": {"application_date": (st.date_input, ["Application Date"], {"value": date.today()}), "fertilizer_type": (st.text_input, ["Fertilizer Type"], {}), "amount_applied": (st.number_input, ["Amount Applied (lbs/acre)"], {"min_value": 0.0, "format": "%.2f"})},
+        "Yield Data": {"harvest_date": (st.date_input, ["Harvest Date"], {"value": date.today()}), "total_yield": (st.number_input, ["Total Yield"], {"min_value": 0.0, "format": "%.2f"}), "units": (st.text_input, ["Units (e.g., bushels)"], {})}
+    }
+
     if data_type == "OpenET Data":
         if not OPENET_API_KEY:
             st.error("OpenET API key not configured.")
@@ -232,20 +247,6 @@ else:
         st.dataframe(df_to_show)
 
     elif data_type in form_key_map: # Handle all other data entry forms
-        form_key_map = {
-            "Water Usage": "water_form", "Crop Data": "crop_form",
-            "Soil Data": "soil_form", "Fertilizer Data": "fertilizer_form",
-            "Yield Data": "yield_form"
-        }
-        
-        fields_map = {
-            "Water Usage": {"date": (st.date_input, ["Date"], {"value": date.today()}), "water_gallons": (st.number_input, ["Water Used (Gallons)"], {"min_value": 0.0, "format": "%.2f"}), "source": (st.selectbox, ["Water Source"], {"options": ["Well", "River", "Canal", "Municipal"]})},
-            "Crop Data": {"planting_date": (st.date_input, ["Planting Date"], {"value": date.today()}), "crop_type": (st.selectbox, ["Crop Type"], {"options": ["Corn", "Soybeans", "Wheat", "Cotton", "Other"]}), "acres_planted": (st.number_input, ["Acres Planted"], {"min_value": 0.0, "format": "%.2f"})},
-            "Soil Data": {"sample_date": (st.date_input, ["Sample Date"], {"value": date.today()}), "ph_level": (st.number_input, ["pH Level"], {"min_value": 0.0, "max_value": 14.0, "format": "%.1f"}), "organic_matter": (st.number_input, ["Organic Matter (%)"], {"min_value": 0.0, "format": "%.2f"})},
-            "Fertilizer Data": {"application_date": (st.date_input, ["Application Date"], {"value": date.today()}), "fertilizer_type": (st.text_input, ["Fertilizer Type"], {}), "amount_applied": (st.number_input, ["Amount Applied (lbs/acre)"], {"min_value": 0.0, "format": "%.2f"})},
-            "Yield Data": {"harvest_date": (st.date_input, ["Harvest Date"], {"value": date.today()}), "total_yield": (st.number_input, ["Total Yield"], {"min_value": 0.0, "format": "%.2f"}), "units": (st.text_input, ["Units (e.g., bushels)"], {})}
-        }
-        
         with st.form(form_key_map[data_type]):
             st.subheader("Data Details")
             columns = st.columns(2)
