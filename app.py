@@ -68,56 +68,75 @@ def load_data_from_github(url):
 @st.cache_data
 def fetch_openet_data(_geometry, start_date, end_date, api_key):
     """
-    Fetches time series data from the OpenET API for a single point (centroid).
+    Fetches time series data from the OpenET API for a single point (centroid)
+    using the /raster/timeseries/point endpoint.
     """
-    API_URL = "https://openet-api.org/v2/timeseries/point"
+    # CHANGED: Updated API_URL to match the working script
+    API_URL = "https://openet-api.org/raster/timeseries/point"
+    
     headers = {
+        "accept": "application/json", # ADDED: To match working script
         "Content-Type": "application/json",
         "Authorization": api_key
     }
     
+    # CHANGED: Re-structured the payload to match the /raster endpoint
     payload = {
-        "latitude": _geometry.centroid.y,
-        "longitude": _geometry.centroid.x,
-        "start_date": start_date.strftime("%Y-%m-%d"),
-        "end_date": end_date.strftime("%Y-%m-%d"),
-        "model": "ensemble",
-        "variable": ["et"], # Only request "et"
-        "output_format": "csv"
+        "date_range": [
+            start_date.strftime("%Y-%m-%d"),
+            end_date.strftime("%Y-%m-%d")
+        ],
+        "file_format": "JSON",
+        "geometry": [
+            _geometry.centroid.x,  # Longitude
+            _geometry.centroid.y   # Latitude
+        ],
+        "interval": "monthly",    # ADDED: Hardcoded to match working script
+        "model": "Ensemble",      # ADDED: Capitalized to match
+        "reference_et": "gridMET",# ADDED: To match working script
+        "units": "mm",            # ADDED: To match working script
+        "variable": "ET"          # ADDED: Capitalized & not in a list
     }
 
+    # Debugging output remains the same
     if st.session_state.get("debug_mode", False):
-        st.sidebar.subheader("API Request Payload")
+        st.sidebar.subheader("API Request Details")
+        st.sidebar.write("**URL:**")
+        st.sidebar.code(API_URL, language="text")
+        st.sidebar.write("**Headers:**")
+        st.sidebar.json(headers)
+        st.sidebar.write("**Payload:**")
         st.sidebar.json(payload)
 
     try:
         response = requests.post(API_URL, headers=headers, json=payload)
         response.raise_for_status()
         
-        df = pd.read_csv(io.StringIO(response.text))
-        df['date'] = pd.to_datetime(df['time'])
+        # CHANGED: Process JSON response instead of CSV
+        data = response.json()
+        
+        # The data comes in a 'timeseries' list of dicts
+        df = pd.DataFrame(data['timeseries'])
+        
+        df['date'] = pd.to_datetime(df['date'])
         df.set_index('date', inplace=True)
         
-        # Simplify the renaming logic for ET only
-        rename_map = {col: 'ET (mm)' for col in df.columns if 'et_ensemble' in col}
-        df.rename(columns=rename_map, inplace=True)
+        # The column name is 'ET', rename it to what the app expects
+        df.rename(columns={'ET': 'ET (mm)'}, inplace=True)
         
-        # Return only the ET column
+        # Return only the expected column
         return df[['ET (mm)']]
         
     except requests.exceptions.RequestException as e:
-        if e.response and e.response.status_code == 404:
-            st.error("OpenET API Error: 404 Not Found.")
-            st.warning("""
-                This can occur for a few reasons:
-                1.  **API Key:** The API key in your Streamlit secrets might be invalid or expired. Please double-check it.
-                2.  **Location:** The selected point might be outside OpenET's coverage area.
-                
-                Enable "Debug Mode" in the sidebar to view the exact data payload sent to the API.
-            """)
-        else:
-            st.error(f"OpenET API Error: {e}")
-            st.error(f"Response content: {e.response.text if e.response else 'No response'}")
+        # Error handling remains largely the same
+        st.error(f"OpenET API Error: {e}")
+        if e.response:
+            st.error(f"Status Code: {e.response.status_code}")
+            try:
+                # Try to pretty-print JSON error details
+                st.json(e.response.json())
+            except json.JSONDecodeError:
+                st.text(e.response.text)
         return None
 
 # --- Main App ---
