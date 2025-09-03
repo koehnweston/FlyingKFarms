@@ -61,30 +61,22 @@ def load_data_from_github(url):
         if tmp_path and os.path.exists(tmp_path):
             os.unlink(tmp_path)
 
+# Replace your old function with this one
 @st.cache_data
 def fetch_openet_data(_geometry, start_date, end_date, api_key):
     """
-    Fetches time series data from the OpenET API for a single point (centroid)
-    using the /raster/timeseries/point endpoint.
+    Fetches time series data from the OpenET API and STOPS to debug the columns.
     """
     API_URL = "https://openet-api.org/raster/timeseries/point"
-    
     headers = {
         "accept": "application/json",
         "Content-Type": "application/json",
         "Authorization": api_key
     }
-    
     payload = {
-        "date_range": [
-            start_date.strftime("%Y-%m-%d"),
-            end_date.strftime("%Y-%m-%d")
-        ],
+        "date_range": [start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")],
         "file_format": "JSON",
-        "geometry": [
-            _geometry.centroid.x,  # Longitude
-            _geometry.centroid.y   # Latitude
-        ],
+        "geometry": [_geometry.centroid.x, _geometry.centroid.y],
         "interval": "monthly",
         "model": "Ensemble",
         "reference_et": "gridMET",
@@ -95,20 +87,18 @@ def fetch_openet_data(_geometry, start_date, end_date, api_key):
     try:
         response = requests.post(API_URL, headers=headers, json=payload)
         response.raise_for_status()
-        
         data = response.json()
         df = pd.DataFrame(data)
-        
-        # Use the correct column name 'time'
-        df['date'] = pd.to_datetime(df['time'])
-        
-        df.set_index('date', inplace=True)
-        
-        # Rename the correct column 'et' to what the chart expects
-        df.rename(columns={'et': 'ET (mm)'}, inplace=True)
-        
-        return df[['ET (mm)']]
-        
+
+        # --- THIS IS THE DEBUGGING CODE ---
+        st.error("DEBUGGING: App has been stopped to show the data columns.")
+        st.write("👇 The actual column names received from the API are:")
+        st.code(df.columns.tolist())
+        st.write("👇 Here is a preview of the data:")
+        st.dataframe(df)
+        st.stop() # This halts the app so you can see the message.
+        # ------------------------------------
+
     except requests.exceptions.RequestException as e:
         st.error(f"OpenET API Error: {e}")
         if e.response:
