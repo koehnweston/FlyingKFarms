@@ -15,6 +15,7 @@ import json
 st.set_page_config(page_title="Farming Data Entry", page_icon="🌾", layout="wide")
 
 # --- API Key Configuration ---
+# Ensure you have OPENET_API_KEY in your Streamlit secrets
 OPENET_API_KEY = st.secrets.get("OPENET_API_KEY")
 
 # --- Data Loading ---
@@ -85,7 +86,7 @@ def fetch_openet_data(_geometry, start_date, end_date, api_key):
             _geometry.centroid.x,  # Longitude
             _geometry.centroid.y   # Latitude
         ],
-        "interval": "daily",      # CHANGED: Switched to daily data download
+        "interval": "daily",
         "model": "Ensemble",
         "reference_et": "gridMET",
         "units": "in",
@@ -99,12 +100,11 @@ def fetch_openet_data(_geometry, start_date, end_date, api_key):
         data = response.json()
         df = pd.DataFrame(data)
         
-        # Use the correct column name 'time'
+        # OpenET API returns a 'time' column
         df['date'] = pd.to_datetime(df['time'])
-        
         df.set_index('date', inplace=True)
         
-        # Rename the correct column 'et' to what the chart expects
+        # The ET variable is returned in a column named 'et'
         df.rename(columns={'et': 'ET (in)'}, inplace=True)
         
         return df[['ET (in)']]
@@ -126,23 +126,24 @@ st.markdown("# 🌾 Farming Data Entry")
 st.sidebar.header("Field Setup")
 st.sidebar.info("Field data is automatically loaded from GitHub.")
 
-st.session_state.debug_mode = st.sidebar.checkbox("Enable Debug Mode")
-
 if st.sidebar.button("Clear Cache & Reload Data"):
     st.cache_data.clear()
     st.session_state.clear()
     st.rerun()
 
+# --- Data Loading Logic ---
 if 'data_loaded' not in st.session_state:
     with st.spinner("Loading field data from GitHub..."):
         gdf = load_data_from_github(SHAPEFILE_URL)
         if gdf is not None:
+            # Standardize column names for 'Section' and 'Area'
             column_map = {col.lower(): col for col in gdf.columns}
             if 'section' in column_map:
                 gdf.rename(columns={column_map['section']: 'Section'}, inplace=True)
             if 'area' in column_map:
                 gdf.rename(columns={column_map['area']: 'Area'}, inplace=True)
 
+            # Calculate centroids for display
             if 'geometry' in gdf.columns and not gdf.empty:
                 centroids = gdf.geometry.centroid
                 gdf['X'] = centroids.x
@@ -150,6 +151,7 @@ if 'data_loaded' not in st.session_state:
             
             st.session_state.gdf = gdf
             
+            # Populate field options for the dropdown
             if "Section" in gdf.columns:
                 st.session_state.field_options = sorted(gdf["Section"].unique().tolist())
                 st.sidebar.success(f"Loaded {len(st.session_state.field_options)} unique sections.")
@@ -164,21 +166,19 @@ if 'data_loaded' not in st.session_state:
 if not st.session_state.get('field_options'):
     st.warning("Could not load field data. Please check the configuration.")
 else:
-    data_type = st.selectbox(
-        "Select Data Type",
-        ["Water Usage", "Crop Data", "Soil Data", "Fertilizer Data", "Yield Data", "OpenET Data"]
-    )
-    st.markdown("---")
+    # This is the only data type now, so the dropdown is removed.
+    data_type = "OpenET Data"
     
     st.subheader("Field Information")
     selected_section = st.selectbox("Select Field Section", options=st.session_state.field_options, index=0)
 
-    if selected_section and st.session_state.gdf is not None:
+    if selected_section and 'gdf' in st.session_state and st.session_state.gdf is not None:
         section_data = st.session_state.gdf[st.session_state.gdf["Section"] == selected_section].iloc[0]
         
+        # Display field metrics and map
         col1, col2, col3 = st.columns(3)
-        col1.metric("X", f"{section_data.get('X', 0):.4f}")
-        col2.metric("Y", f"{section_data.get('Y', 0):.4f}")
+        col1.metric("X (Longitude)", f"{section_data.get('X', 0):.4f}")
+        col2.metric("Y (Latitude)", f"{section_data.get('Y', 0):.4f}")
         col3.metric("Area", f"{section_data.get('Area', 0):.2f}")
 
         st.markdown("##### Field Map")
@@ -188,68 +188,48 @@ else:
         folium.GeoJson(section_data.geometry, style_function=lambda x: {'fillColor': 'cyan', 'color': 'blue', 'weight': 2.5, 'fillOpacity': 0.4}).add_to(m)
         st_folium(m, key=selected_section, width=725, height=500)
 
-    st.markdown(f"### Enter {data_type}")
+    st.markdown("---")
+    st.markdown(f"### Fetch {data_type}")
 
-    form_key_map = {
-        "Water Usage": "water_form", "Crop Data": "crop_form",
-        "Soil Data": "soil_form", "Fertilizer Data": "fertilizer_form",
-        "Yield Data": "yield_form"
-    }
+    # --- OpenET Data Section ---
+    if not OPENET_API_KEY:
+        st.error("OpenET API key not configured.")
+        st.info("""
+            To use this feature, add your OpenET API key to Streamlit's secrets.
+            1. Go to your app's dashboard on Streamlit Community Cloud.
+            2. Click on 'Settings' > 'Secrets'.
+            3. Add a secret with the key `OPENET_API_KEY` and your API token as the value.
+            For example: `OPENET_API_KEY = "your-key-here"`
+        """)
+    else:
+        # Date range selection
+        today = date.today()
+        one_year_ago = today - timedelta(days=365)
+        dcol1, dcol2 = st.columns(2)
+        start_date = dcol1.date_input("Start Date", one_year_ago)
+        end_date = dcol2.date_input("End Date", today)
+
+        # Fetch button and logic
+        if start_date > end_date:
+            st.warning("Start date cannot be after end date.")
+        elif st.button("Fetch OpenET Data"):
+            with st.spinner(f"Fetching OpenET data for '{selected_section}'..."):
+                openet_df = fetch_openet_data(section_data.geometry, start_date, end_date, OPENET_API_KEY)
+                if openet_df is not None and not openet_df.empty:
+                    st.session_state[f'openet_{selected_section}'] = openet_df
+                else:
+                    st.warning("No data returned from OpenET. This could be due to the date range or API issues.")
+                    if f'openet_{selected_section}' in st.session_state:
+                        del st.session_state[f'openet_{selected_section}']
     
-    fields_map = {
-        "Water Usage": {"date": (st.date_input, ["Date"], {"value": date.today()}), "water_gallons": (st.number_input, ["Water Used (Gallons)"], {"min_value": 0.0, "format": "%.2f"}), "source": (st.selectbox, ["Water Source"], {"options": ["Well", "River", "Canal", "Municipal"]})},
-        "Crop Data": {"planting_date": (st.date_input, ["Planting Date"], {"value": date.today()}), "crop_type": (st.selectbox, ["Crop Type"], {"options": ["Corn", "Soybeans", "Wheat", "Cotton", "Other"]}), "acres_planted": (st.number_input, ["Acres Planted"], {"min_value": 0.0, "format": "%.2f"})},
-        "Soil Data": {"sample_date": (st.date_input, ["Sample Date"], {"value": date.today()}), "ph_level": (st.number_input, ["pH Level"], {"min_value": 0.0, "max_value": 14.0, "format": "%.1f"}), "organic_matter": (st.number_input, ["Organic Matter (%)"], {"min_value": 0.0, "format": "%.2f"})},
-        "Fertilizer Data": {"application_date": (st.date_input, ["Application Date"], {"value": date.today()}), "fertilizer_type": (st.text_input, ["Fertilizer Type"], {}), "amount_applied": (st.number_input, ["Amount Applied (lbs/acre)"], {"min_value": 0.0, "format": "%.2f"})},
-        "Yield Data": {"harvest_date": (st.date_input, ["Harvest Date"], {"value": date.today()}), "total_yield": (st.number_input, ["Total Yield"], {"min_value": 0.0, "format": "%.2f"}), "units": (st.text_input, ["Units (e.g., bushels)"], {})}
-    }
-
-    if data_type == "OpenET Data":
-        if not OPENET_API_KEY:
-            st.error("OpenET API key not configured.")
-            st.info("""
-                To use this feature, add your OpenET API key to Streamlit's secrets.
-                1. Go to your app's dashboard on Streamlit Coinunity Cloud.
-                2. Click on 'Settings' > 'Secrets'.
-                3. Add a secret with the key `OPENET_API_KEY` and your API token as the value.
-                For example: `OPENET_API_KEY = "your-key-here"`
-            """)
-        else:
-            today = date.today()
-            one_year_ago = today - timedelta(days=365)
-            dcol1, dcol2 = st.columns(2)
-            start_date = dcol1.date_input("Start Date", one_year_ago)
-            end_date = dcol2.date_input("End Date", today)
-
-            if start_date > end_date:
-                st.warning("Start date cannot be after end date.")
-            elif st.button("Fetch OpenET Data"):
-                with st.spinner(f"Fetching OpenET data for '{selected_section}'..."):
-                    openet_df = fetch_openet_data(section_data.geometry, start_date, end_date, OPENET_API_KEY)
-                    if openet_df is not None and not openet_df.empty:
-                        st.session_state[f'openet_{selected_section}'] = openet_df
-                    else:
-                        st.warning("No data returned from OpenET.")
-                        if f'openet_{selected_section}' in st.session_state:
-                            del st.session_state[f'openet_{selected_section}']
-    
+    # Display fetched OpenET data if it exists in the session state
     if st.session_state.get(f'openet_{selected_section}') is not None:
         st.markdown("---")
         st.subheader(f"OpenET Data for Section: {selected_section}")
         df_to_show = st.session_state[f'openet_{selected_section}']
+        
         st.markdown("##### Evapotranspiration (ET)")
         st.line_chart(df_to_show['ET (in)'])
+        
         st.markdown("##### Raw Data")
         st.dataframe(df_to_show)
-
-    elif data_type in form_key_map: 
-        with st.form(form_key_map[data_type]):
-            st.subheader("Data Details")
-            columns = st.columns(2)
-            field_items = list(fields_map[data_type].items())
-            for i, (name, (func, args, kwargs)) in enumerate(field_items):
-                with columns[i % 2]:
-                    func(*args, **kwargs)
-            st.text_area("Notes")
-            if st.form_submit_button(f"Submit {data_type}"):
-                st.success(f"{data_type} for '{selected_section}' submitted!")
