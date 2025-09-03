@@ -53,21 +53,22 @@ def load_data_from_github(url):
 
 @st.cache_data
 def fetch_et_data(_geometry, start_date, end_date, api_key):
-    """Fetches daily ET data in inches."""
+    """Fetches ET data, matching the working script."""
     API_URL = "https://openet-api.org/raster/timeseries/point"
     headers = {
         "accept": "application/json",
         "Content-Type": "application/json",
         "Authorization": api_key
     }
+    # CHANGED: Payload now matches the working standalone script
     payload = {
         "date_range": [start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")],
         "geometry": [_geometry.centroid.x, _geometry.centroid.y],
-        "interval": "daily",
+        "interval": "monthly",      # CHANGED from "daily"
         "model": "Ensemble",
         "reference_et": "gridMET",
         "variable": "ET",
-        "units": "inches"
+        "units": "mm"               # CHANGED from "inches"
     }
     try:
         response = requests.post(API_URL, headers=headers, json=payload)
@@ -77,8 +78,9 @@ def fetch_et_data(_geometry, start_date, end_date, api_key):
             df = pd.DataFrame(data)
             df['date'] = pd.to_datetime(df['time'])
             df.set_index('date', inplace=True)
-            df.rename(columns={'et': 'ET (in)'}, inplace=True)
-            return df[['ET (in)']]
+            # CHANGED: Column name updated to reflect new units
+            df.rename(columns={'et': 'ET (mm)'}, inplace=True)
+            return df[['ET (mm)']]
     except requests.exceptions.RequestException as e:
         st.error(f"OpenET API Error: {e}")
         if e.response:
@@ -164,11 +166,11 @@ else:
 
             if start_date > end_date:
                 st.warning("Start date cannot be after end date.")
-            elif st.button("Fetch ET Data"): # CHANGED Button text
+            elif st.button("Fetch ET Data"):
                 with st.spinner(f"Fetching ET data for '{selected_section}'..."):
                     et_df = fetch_et_data(section_data.geometry, start_date, end_date, OPENET_API_KEY)
 
-                    if et_df is not None: # SIMPLIFIED Logic
+                    if et_df is not None:
                         st.session_state[f'openet_{selected_section}'] = et_df
                     else:
                         st.warning("Could not retrieve data from OpenET.")
@@ -181,8 +183,8 @@ else:
         st.subheader(f"OpenET Data for Section: {selected_section}")
         df_to_show = st.session_state[f'openet_{selected_section}']
 
-        st.markdown("##### Daily Evapotranspiration (ET)")
-        st.line_chart(df_to_show['ET (in)']) # SIMPLIFIED Plot
+        st.markdown("##### Monthly Evapotranspiration (ET)")
+        st.line_chart(df_to_show['ET (mm)']) # Y-axis label reflects new units
 
         st.markdown("##### Raw Data")
         st.dataframe(df_to_show)
