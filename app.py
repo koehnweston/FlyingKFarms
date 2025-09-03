@@ -61,36 +61,37 @@ def load_data_from_github(url):
         if tmp_path and os.path.exists(tmp_path):
             os.unlink(tmp_path)
 
-# NEW: Internal "worker" function to fetch a single variable. Not cached directly.
-def _fetch_openet_variable(_geometry, start_date, end_date, api_key, variable):
+@st.cache_data
+def fetch_openet_data(_geometry, start_date, end_date, api_key):
     """
-    Fetches time series data for a single variable from the OpenET API,
-    constructing the payload correctly for that variable.
+    Fetches time series data from the OpenET API for a single point (centroid)
+    using the /raster/timeseries/point endpoint.
     """
     API_URL = "https://openet-api.org/raster/timeseries/point"
+    
     headers = {
         "accept": "application/json",
         "Content-Type": "application/json",
         "Authorization": api_key
     }
     
-    # Base payload for all requests
     payload = {
-        "date_range": [start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")],
-        "geometry": [_geometry.centroid.x, _geometry.centroid.y],
-        "interval": "daily",
-        "model": "Ensemble",
-        "variable": variable,
+        "date_range": [
+            start_date.strftime("%Y-%m-%d"),
+            end_date.strftime("%Y-%m-%d")
+        ],
         "file_format": "JSON",
+        "geometry": [
+            _geometry.centroid.x,  # Longitude
+            _geometry.centroid.y   # Latitude
+        ],
+        "interval": "daily",      # CHANGED: Switched to daily data download
+        "model": "Ensemble",
+        "reference_et": "gridMET",
+        "units": "in",
+        "variable": "ET"
     }
-    
-    # Add variable-specific parameters
-    if variable == "ET":
-        payload["units"] = "mm"
-        payload["reference_et"] = "gridMET"
-    
-    # For NDVI, no extra parameters are needed (specifically no 'units')
-    
+
     try:
         response = requests.post(API_URL, headers=headers, json=payload)
         response.raise_for_status()
@@ -98,49 +99,25 @@ def _fetch_openet_variable(_geometry, start_date, end_date, api_key, variable):
         data = response.json()
         df = pd.DataFrame(data)
         
+        # Use the correct column name 'time'
         df['date'] = pd.to_datetime(df['time'])
+        
         df.set_index('date', inplace=True)
         
-        # Rename column based on the variable fetched
-        column_name_lower = variable.lower()
-        if column_name_lower in df.columns:
-            display_name = 'ET (mm)' if variable == 'ET' else 'NDVI'
-            df.rename(columns={column_name_lower: display_name}, inplace=True)
-            return df[[display_name]]
-        else:
-            st.warning(f"Expected column '{column_name_lower}' not found in API response for {variable}.")
-            return None
-
+        # Rename the correct column 'et' to what the chart expects
+        df.rename(columns={'et': 'ET (in)'}, inplace=True)
+        
+        return df[['ET (in)']]
+        
     except requests.exceptions.RequestException as e:
-        # Don't show a full error for each failed call, the orchestrator will handle it
-        st.warning(f"Could not fetch {variable} data from OpenET. Reason: {e}")
+        st.error(f"OpenET API Error: {e}")
+        if e.response:
+            st.error(f"Status Code: {e.response.status_code}")
+            try:
+                st.json(e.response.json())
+            except json.JSONDecodeError:
+                st.text(e.response.text)
         return None
-
-# NEW: "Orchestrator" function that calls the worker for each variable and merges results.
-@st.cache_data
-def fetch_all_openet_data(_geometry, start_date, end_date, api_key):
-    """
-    Fetches both ET and NDVI data by making separate API calls and merging the results.
-    """
-    st.write("Fetching Evapotranspiration (ET) data...")
-    et_df = _fetch_openet_variable(_geometry, start_date, end_date, api_key, "ET")
-    
-    st.write("Fetching Normalized Difference Vegetation Index (NDVI) data...")
-    ndvi_df = _fetch_openet_variable(_geometry, start_date, end_date, api_key, "NDVI")
-
-    # Combine the results into a single DataFrame
-    data_frames = []
-    if et_df is not None:
-        data_frames.append(et_df)
-    if ndvi_df is not None:
-        data_frames.append(ndvi_df)
-
-    if not data_frames:
-        return None
-    
-    # Concatenate along columns, joining on the datetime index
-    combined_df = pd.concat(data_frames, axis=1)
-    return combined_df
 
 # --- Main App ---
 st.markdown("# 🌾 Farming Data Entry")
@@ -232,6 +209,9 @@ else:
             st.error("OpenET API key not configured.")
             st.info("""
                 To use this feature, add your OpenET API key to Streamlit's secrets.
+                1. Go to your app's dashboard on Streamlit Coinunity Cloud.
+                2. Click on 'Settings' > 'Secrets'.
+                3. Add a secret with the key `OPENET_API_KEY` and your API token as the value.
                 For example: `OPENET_API_KEY = "your-key-here"`
             """)
         else:
@@ -244,14 +224,12 @@ else:
             if start_date > end_date:
                 st.warning("Start date cannot be after end date.")
             elif st.button("Fetch OpenET Data"):
-                # MODIFIED: Call the new orchestrator function
                 with st.spinner(f"Fetching OpenET data for '{selected_section}'..."):
-                    openet_df = fetch_all_openet_data(section_data.geometry, start_date, end_date, OPENET_API_KEY)
+                    openet_df = fetch_openet_data(section_data.geometry, start_date, end_date, OPENET_API_KEY)
                     if openet_df is not None and not openet_df.empty:
                         st.session_state[f'openet_{selected_section}'] = openet_df
-                        st.success("Data fetched successfully!")
                     else:
-                        st.error("Failed to fetch any data from OpenET.")
+                        st.warning("No data returned from OpenET.")
                         if f'openet_{selected_section}' in st.session_state:
                             del st.session_state[f'openet_{selected_section}']
     
@@ -259,15 +237,8 @@ else:
         st.markdown("---")
         st.subheader(f"OpenET Data for Section: {selected_section}")
         df_to_show = st.session_state[f'openet_{selected_section}']
-        
-        if 'ET (mm)' in df_to_show.columns:
-            st.markdown("##### Evapotranspiration (ET)")
-            st.line_chart(df_to_show['ET (mm)'])
-        
-        if 'NDVI' in df_to_show.columns:
-            st.markdown("##### Normalized Difference Vegetation Index (NDVI)")
-            st.line_chart(df_to_show['NDVI'])
-        
+        st.markdown("##### Evapotranspiration (ET)")
+        st.line_chart(df_to_show['ET (in)'])
         st.markdown("##### Raw Data")
         st.dataframe(df_to_show)
 
