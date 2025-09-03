@@ -105,7 +105,7 @@ def fetch_ndvi_data(_geometry, start_date, end_date, api_key):
         "date_range": [start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")],
         "geometry": [_geometry.centroid.x, _geometry.centroid.y],
         "interval": "daily",
-        "model": "Ensemble",
+        "model": "landsat",
         "variable": "NDVI" # CHANGED
     }
     data = make_openet_api_call(payload, api_key)
