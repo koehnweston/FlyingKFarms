@@ -77,7 +77,7 @@ def fetch_openet_data(_geometry, start_date, end_date, api_key):
         "date_range": [start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")],
         "file_format": "JSON",
         "geometry": [_geometry.centroid.x, _geometry.centroid.y],
-        "interval": "monthly",
+        "interval": "daily",
         "model": "Ensemble",
         "reference_et": "gridMET",
         "units": "mm",
