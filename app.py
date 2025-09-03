@@ -65,27 +65,24 @@ def load_data_from_github(url):
         if tmp_path and os.path.exists(tmp_path):
             os.unlink(tmp_path)
 
-
 @st.cache_data
 def fetch_openet_data(_geometry, start_date, end_date, api_key):
     """
     Fetches time series data from the OpenET API for a single point (centroid).
     """
-    # 1. CHANGE: Update the API endpoint URL for a point query
     API_URL = "https://openet-api.org/v2/timeseries/point"
     headers = {
         "Content-Type": "application/json",
         "Authorization": api_key
     }
     
-    # 2. CHANGE: Restructure the payload to use latitude and longitude from the centroid
     payload = {
         "latitude": _geometry.centroid.y,
         "longitude": _geometry.centroid.x,
         "start_date": start_date.strftime("%Y-%m-%d"),
         "end_date": end_date.strftime("%Y-%m-%d"),
         "model": "ensemble",
-        "variable": ["et", "ndvi"],
+        "variable": ["et"], # Only request "et"
         "output_format": "csv"
     }
 
@@ -101,11 +98,12 @@ def fetch_openet_data(_geometry, start_date, end_date, api_key):
         df['date'] = pd.to_datetime(df['time'])
         df.set_index('date', inplace=True)
         
+        # Simplify the renaming logic for ET only
         rename_map = {col: 'ET (mm)' for col in df.columns if 'et_ensemble' in col}
-        rename_map.update({col: 'NDVI' for col in df.columns if 'ndvi_ensemble' in col})
         df.rename(columns=rename_map, inplace=True)
         
-        return df[['ET (mm)', 'NDVI']]
+        # Return only the ET column
+        return df[['ET (mm)']]
         
     except requests.exceptions.RequestException as e:
         if e.response and e.response.status_code == 404:
@@ -114,22 +112,6 @@ def fetch_openet_data(_geometry, start_date, end_date, api_key):
                 This can occur for a few reasons:
                 1.  **API Key:** The API key in your Streamlit secrets might be invalid or expired. Please double-check it.
                 2.  **Location:** The selected point might be outside OpenET's coverage area.
-                
-                Enable "Debug Mode" in the sidebar to view the exact data payload sent to the API.
-            """)
-        else:
-            st.error(f"OpenET API Error: {e}")
-            st.error(f"Response content: {e.response.text if e.response else 'No response'}")
-        return None
-        
-    except requests.exceptions.RequestException as e:
-        if e.response and e.response.status_code == 404:
-            st.error("OpenET API Error: 404 Not Found.")
-            st.warning("""
-                This can occur for a few reasons:
-                1.  **Location:** The selected field might be outside OpenET's coverage area.
-                2.  **API Key:** The API key in your Streamlit secrets might be invalid or expired. Please double-check it.
-                3.  **Request Format:** There might be an issue with the data sent.
                 
                 Enable "Debug Mode" in the sidebar to view the exact data payload sent to the API.
             """)
@@ -259,8 +241,6 @@ else:
         df_to_show = st.session_state[f'openet_{selected_section}']
         st.markdown("##### Evapotranspiration (ET)")
         st.line_chart(df_to_show['ET (mm)'])
-        st.markdown("##### Normalized Difference Vegetation Index (NDVI)")
-        st.line_chart(df_to_show['NDVI'])
         st.markdown("##### Raw Data")
         st.dataframe(df_to_show)
 
