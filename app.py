@@ -60,16 +60,21 @@ def fetch_et_data(_geometry, start_date, end_date, api_key):
         "Content-Type": "application/json",
         "Authorization": api_key
     }
-    # CHANGED: Payload now matches the working standalone script
     payload = {
         "date_range": [start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")],
         "geometry": [_geometry.centroid.x, _geometry.centroid.y],
-        "interval": "daily",      # CHANGED from "daily"
+        "interval": "monthly",
         "model": "Ensemble",
         "reference_et": "gridMET",
         "variable": "ET",
-        "units": "in"               # CHANGED from "inches"
+        "units": "mm"
     }
+
+    # ADDED: Debug mode logic to display the payload
+    if st.session_state.get("debug_mode", False):
+        st.sidebar.subheader("API Request Payload")
+        st.sidebar.json(payload)
+
     try:
         response = requests.post(API_URL, headers=headers, json=payload)
         response.raise_for_status()
@@ -78,7 +83,6 @@ def fetch_et_data(_geometry, start_date, end_date, api_key):
             df = pd.DataFrame(data)
             df['date'] = pd.to_datetime(df['time'])
             df.set_index('date', inplace=True)
-            # CHANGED: Column name updated to reflect new units
             df.rename(columns={'et': 'ET (mm)'}, inplace=True)
             return df[['ET (mm)']]
     except requests.exceptions.RequestException as e:
@@ -97,6 +101,10 @@ st.markdown("# 🌾 Farming Data Entry")
 # --- Sidebar ---
 st.sidebar.header("Field Setup")
 st.sidebar.info("Field data is automatically loaded from GitHub.")
+
+# ADDED: Checkbox to control the debug mode
+st.session_state.debug_mode = st.sidebar.checkbox("Enable Debug Mode")
+
 if st.sidebar.button("Clear Cache & Reload Data"):
     st.cache_data.clear()
     st.session_state.clear()
@@ -184,7 +192,7 @@ else:
         df_to_show = st.session_state[f'openet_{selected_section}']
 
         st.markdown("##### Monthly Evapotranspiration (ET)")
-        st.line_chart(df_to_show['ET (mm)']) # Y-axis label reflects new units
+        st.line_chart(df_to_show['ET (mm)'])
 
         st.markdown("##### Raw Data")
         st.dataframe(df_to_show)
