@@ -219,7 +219,7 @@ else:
                         st.warning("No data returned from OpenET.")
                         if f'openet_{selected_section}' in st.session_state:
                             del st.session_state[f'openet_{selected_section}']
-        
+    
     if st.session_state.get(f'openet_{selected_section}') is not None:
         st.markdown("---")
         st.subheader(f"OpenET Data for Section: {selected_section}")
@@ -231,7 +231,7 @@ else:
         st.markdown("##### Raw Data")
         st.dataframe(df_to_show)
 
-    else: # Handle all other data entry forms
+    elif data_type in form_key_map: # Handle all other data entry forms
         form_key_map = {
             "Water Usage": "water_form", "Crop Data": "crop_form",
             "Soil Data": "soil_form", "Fertilizer Data": "fertilizer_form",
