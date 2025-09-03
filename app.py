@@ -103,9 +103,8 @@ def fetch_openet_data(_geometry, start_date, end_date, api_key):
         data = response.json()
         df = pd.DataFrame(data)
         
-        # FINAL FIX: Replace 'YOUR_DATE_COLUMN_NAME' with the actual column
-        # name you found in the debugging step above.
-        df['date'] = pd.to_datetime(df['YOUR_DATE_COLUMN_NAME'])
+        # FINAL FIX: The correct column name is 'datetime'.
+        df['date'] = pd.to_datetime(df['datetime'])
         
         df.set_index('date', inplace=True)
         
