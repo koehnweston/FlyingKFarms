@@ -64,11 +64,11 @@ def fetch_et_data(_geometry, start_date, end_date, api_key):
     payload = {
         "date_range": [start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")],
         "geometry": [_geometry.centroid.x, _geometry.centroid.y],
-        "interval": "monthly",      # CHANGED from "daily"
+        "interval": "daily",      # CHANGED from "daily"
         "model": "Ensemble",
         "reference_et": "gridMET",
         "variable": "ET",
-        "units": "mm"               # CHANGED from "inches"
+        "units": "in"               # CHANGED from "inches"
     }
     try:
         response = requests.post(API_URL, headers=headers, json=payload)
