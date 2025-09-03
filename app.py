@@ -88,7 +88,7 @@ def fetch_openet_data(_geometry, start_date, end_date, api_key):
         "interval": "daily",      # CHANGED: Switched to daily data download
         "model": "Ensemble",
         "reference_et": "gridMET",
-        "units": "mm",
+        "units": "in",
         "variable": "ET"
     }
 
@@ -105,9 +105,9 @@ def fetch_openet_data(_geometry, start_date, end_date, api_key):
         df.set_index('date', inplace=True)
         
         # Rename the correct column 'et' to what the chart expects
-        df.rename(columns={'et': 'ET (mm)'}, inplace=True)
+        df.rename(columns={'et': 'ET (in)'}, inplace=True)
         
-        return df[['ET (mm)']]
+        return df[['ET (in)']]
         
     except requests.exceptions.RequestException as e:
         st.error(f"OpenET API Error: {e}")
@@ -209,7 +209,7 @@ else:
             st.error("OpenET API key not configured.")
             st.info("""
                 To use this feature, add your OpenET API key to Streamlit's secrets.
-                1. Go to your app's dashboard on Streamlit Community Cloud.
+                1. Go to your app's dashboard on Streamlit Coinunity Cloud.
                 2. Click on 'Settings' > 'Secrets'.
                 3. Add a secret with the key `OPENET_API_KEY` and your API token as the value.
                 For example: `OPENET_API_KEY = "your-key-here"`
@@ -238,7 +238,7 @@ else:
         st.subheader(f"OpenET Data for Section: {selected_section}")
         df_to_show = st.session_state[f'openet_{selected_section}']
         st.markdown("##### Evapotranspiration (ET)")
-        st.line_chart(df_to_show['ET (mm)'])
+        st.line_chart(df_to_show['ET (in)'])
         st.markdown("##### Raw Data")
         st.dataframe(df_to_show)
 
