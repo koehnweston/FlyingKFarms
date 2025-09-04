@@ -65,10 +65,11 @@ def load_data_from_github(url):
 @st.cache_data
 def fetch_openet_data(_geometry, start_date, end_date, api_key):
     """
-    Fetches time series data from the OpenET API for a single point (centroid)
-    using the /raster/timeseries/point endpoint.
+    Fetches time series data from the OpenET API for an entire polygon
+    using the /raster/timeseries/polygon endpoint.
     """
-    API_URL = "https://openet-api.org/raster/timeseries/point"
+    # The API endpoint for polygon queries
+    API_URL = "https://openet-api.org/raster/timeseries/polygon"
     
     headers = {
         "accept": "application/json",
@@ -76,41 +77,46 @@ def fetch_openet_data(_geometry, start_date, end_date, api_key):
         "Authorization": api_key
     }
     
+    # Convert the polygon's exterior coordinates to a flat list [lon1, lat1, lon2, lat2, ...]
+    # which is the format the API expects.
+    coords = _geometry.exterior.coords
+    geometry_list = [val for pair in coords for val in pair]
+
     payload = {
         "date_range": [
             start_date.strftime("%Y-%m-%d"),
             end_date.strftime("%Y-%m-%d")
         ],
-        "file_format": "JSON",
-        "geometry": [
-            _geometry.centroid.x,  # Longitude
-            _geometry.centroid.y   # Latitude
-        ],
-        "interval": "daily",
-        "model": "Ensemble",
-        "reference_et": "gridMET",
-        "units": "in",
-        "variable": "ET"
+        "geometry": geometry_list,
+        "model": "Ensemble",       # Using Ensemble model for robust results
+        "variable": "ET",          # Actual Evapotranspiration
+        "reference_et": "gridMET", # Reference ET source
+        "interval": "daily",       # Get daily data points
+        "reducer": "mean",         # Average the ET values across all pixels in the polygon
+        "units": "in",             # Results in inches
+        "file_format": "JSON"
     }
 
     try:
         response = requests.post(API_URL, headers=headers, json=payload)
-        response.raise_for_status()
+        response.raise_for_status()  # This will raise an exception for HTTP errors
         
         data = response.json()
         df = pd.DataFrame(data)
         
-        # OpenET API returns a 'time' column
+        if df.empty:
+            return None
+        
+        # OpenET API returns a 'time' column and a column named after the variable ('et')
         df['date'] = pd.to_datetime(df['time'])
         df.set_index('date', inplace=True)
-        
-        # The ET variable is returned in a column named 'et'
         df.rename(columns={'et': 'ET (in)'}, inplace=True)
         
         return df[['ET (in)']]
         
     except requests.exceptions.RequestException as e:
         st.error(f"OpenET API Error: {e}")
+        # Provide more detailed error feedback in the Streamlit app
         if e.response:
             st.error(f"Status Code: {e.response.status_code}")
             try:
