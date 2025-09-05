@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import geopandas as gpd
 import zipfile
-import io
 import requests
 from datetime import date, timedelta
 import tempfile
@@ -17,6 +16,7 @@ st.set_page_config(page_title="Farming Data Entry", page_icon="🌾", layout="wi
 # --- API Key Configuration ---
 # Ensure you have OPENET_API_KEY in your Streamlit secrets
 OPENET_API_KEY = st.secrets.get("OPENET_API_KEY")
+API_URL = "https://openet-api.org/raster/timeseries/polygon"
 
 # --- Data Loading ---
 SHAPEFILE_URL = "https://raw.githubusercontent.com/koehnweston/FlyingKFarms/main/parcels_2.zip"
@@ -62,44 +62,44 @@ def load_data_from_github(url):
         if tmp_path and os.path.exists(tmp_path):
             os.unlink(tmp_path)
 
+def handle_api_error(e):
+    """Helper function to display API errors in Streamlit."""
+    st.error(f"OpenET API Error: {e}")
+    if e.response:
+        st.error(f"Status Code: {e.response.status_code}")
+        try:
+            st.json(e.response.json())
+        except json.JSONDecodeError:
+            st.text(e.response.text)
+
 @st.cache_data
 def fetch_openet_data(_geometry, start_date, end_date, api_key):
     """
-    Fetches time series data from the OpenET API for an entire polygon
-    using the /raster/timeseries/polygon endpoint.
+    Fetches daily Evapotranspiration (ET) time series data from the OpenET API.
     """
-    # The API endpoint for polygon queries
-    API_URL = "https://openet-api.org/raster/timeseries/polygon"
-    
     headers = {
         "accept": "application/json",
         "Content-Type": "application/json",
         "Authorization": api_key
     }
-    
-    # Convert the polygon's exterior coordinates to a flat list [lon1, lat1, lon2, lat2, ...]
-    # which is the format the API expects.
     coords = _geometry.exterior.coords
     geometry_list = [val for pair in coords for val in pair]
 
     payload = {
-        "date_range": [
-            start_date.strftime("%Y-%m-%d"),
-            end_date.strftime("%Y-%m-%d")
-        ],
+        "date_range": [start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")],
         "geometry": geometry_list,
-        "model": "Ensemble",       # Using Ensemble model for robust results
-        "variable": "ET",          # Actual Evapotranspiration
-        "reference_et": "gridMET", # Reference ET source
-        "interval": "daily",       # Get daily data points
-        "reducer": "mean",         # Average the ET values across all pixels in the polygon
-        "units": "in",             # Results in inches
+        "model": "Ensemble",
+        "variable": "ET",
+        "reference_et": "gridMET",
+        "interval": "daily",
+        "reducer": "mean",
+        "units": "in",
         "file_format": "JSON"
     }
 
     try:
         response = requests.post(API_URL, headers=headers, json=payload)
-        response.raise_for_status()  # This will raise an exception for HTTP errors
+        response.raise_for_status()
         
         data = response.json()
         df = pd.DataFrame(data)
@@ -107,7 +107,6 @@ def fetch_openet_data(_geometry, start_date, end_date, api_key):
         if df.empty:
             return None
         
-        # OpenET API returns a 'time' column and a column named after the variable ('et')
         df['date'] = pd.to_datetime(df['time'])
         df.set_index('date', inplace=True)
         df.rename(columns={'et': 'ET (in)'}, inplace=True)
@@ -115,14 +114,56 @@ def fetch_openet_data(_geometry, start_date, end_date, api_key):
         return df[['ET (in)']]
         
     except requests.exceptions.RequestException as e:
-        st.error(f"OpenET API Error: {e}")
-        # Provide more detailed error feedback in the Streamlit app
-        if e.response:
-            st.error(f"Status Code: {e.response.status_code}")
-            try:
-                st.json(e.response.json())
-            except json.JSONDecodeError:
-                st.text(e.response.text)
+        handle_api_error(e)
+        return None
+
+# --- NEW FUNCTION FOR NDVI ---
+@st.cache_data
+def fetch_ndvi_data(_geometry, start_date, end_date, api_key):
+    """
+    Fetches daily Normalized Difference Vegetation Index (NDVI) time series from the OpenET API.
+    """
+    headers = {
+        "accept": "application/json",
+        "Content-Type": "application/json",
+        "Authorization": api_key
+    }
+    coords = _geometry.exterior.coords
+    geometry_list = [val for pair in coords for val in pair]
+    
+    payload = {
+        "date_range": [start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")],
+        "geometry": geometry_list,
+        "model": "ssebop",          # SSEBOP is a common and reliable model for NDVI
+        "variable": "ndvi",
+        "reference_et": "gridMET",  # This field is required by the API, even for NDVI
+        "interval": "daily",
+        "reducer": "mean",
+        "file_format": "JSON"       # NDVI is unitless, so 'units' key is omitted
+    }
+
+    try:
+        response = requests.post(API_URL, headers=headers, json=payload)
+        response.raise_for_status()
+        
+        data = response.json()
+        df = pd.DataFrame(data)
+        
+        if df.empty:
+            return None
+        
+        df['date'] = pd.to_datetime(df['time'])
+        df.set_index('date', inplace=True)
+        df.rename(columns={'ndvi': 'NDVI'}, inplace=True)
+        
+        # NDVI values can sometimes be null if there's cloud cover, etc.
+        # We fill them forward to have a more continuous line chart.
+        df['NDVI'] = df['NDVI'].interpolate(method='linear')
+
+        return df[['NDVI']]
+        
+    except requests.exceptions.RequestException as e:
+        handle_api_error(e)
         return None
 
 # --- Main App ---
@@ -142,14 +183,12 @@ if 'data_loaded' not in st.session_state:
     with st.spinner("Loading field data from GitHub..."):
         gdf = load_data_from_github(SHAPEFILE_URL)
         if gdf is not None:
-            # Standardize column names for 'Section' and 'Area'
             column_map = {col.lower(): col for col in gdf.columns}
             if 'section' in column_map:
                 gdf.rename(columns={column_map['section']: 'Section'}, inplace=True)
             if 'area' in column_map:
                 gdf.rename(columns={column_map['area']: 'Area'}, inplace=True)
 
-            # Calculate centroids for display
             if 'geometry' in gdf.columns and not gdf.empty:
                 centroids = gdf.geometry.centroid
                 gdf['X'] = centroids.x
@@ -157,7 +196,6 @@ if 'data_loaded' not in st.session_state:
             
             st.session_state.gdf = gdf
             
-            # Populate field options for the dropdown
             if "Section" in gdf.columns:
                 st.session_state.field_options = sorted(gdf["Section"].unique().tolist())
                 st.sidebar.success(f"Loaded {len(st.session_state.field_options)} unique sections.")
@@ -172,16 +210,12 @@ if 'data_loaded' not in st.session_state:
 if not st.session_state.get('field_options'):
     st.warning("Could not load field data. Please check the configuration.")
 else:
-    # This is the only data type now, so the dropdown is removed.
-    data_type = "OpenET Data"
-    
     st.subheader("Field Information")
     selected_section = st.selectbox("Select Field Section", options=st.session_state.field_options, index=0)
 
     if selected_section and 'gdf' in st.session_state and st.session_state.gdf is not None:
         section_data = st.session_state.gdf[st.session_state.gdf["Section"] == selected_section].iloc[0]
         
-        # Display field metrics and map
         col1, col2, col3 = st.columns(3)
         col1.metric("X (Longitude)", f"{section_data.get('X', 0):.4f}")
         col2.metric("Y (Latitude)", f"{section_data.get('Y', 0):.4f}")
@@ -195,56 +229,82 @@ else:
         st_folium(m, key=selected_section, width=725, height=500)
 
     st.markdown("---")
-    st.markdown(f"### Fetch {data_type}")
+    st.markdown("### Fetch OpenET Data (ET & NDVI)")
 
-    # --- OpenET Data Section ---
     if not OPENET_API_KEY:
         st.error("OpenET API key not configured.")
         st.info("""
             To use this feature, add your OpenET API key to Streamlit's secrets.
-            1. Go to your app's dashboard on Streamlit Community Cloud.
-            2. Click on 'Settings' > 'Secrets'.
-            3. Add a secret with the key `OPENET_API_KEY` and your API token as the value.
             For example: `OPENET_API_KEY = "your-key-here"`
         """)
     else:
-        # Date range selection
         today = date.today()
         one_year_ago = today - timedelta(days=365)
         dcol1, dcol2 = st.columns(2)
         start_date = dcol1.date_input("Start Date", one_year_ago)
         end_date = dcol2.date_input("End Date", today)
 
-        # Fetch button and logic
         if start_date > end_date:
             st.warning("Start date cannot be after end date.")
-        elif st.button("Fetch OpenET Data"):
+        elif st.button("Fetch ET and NDVI Data"):
             with st.spinner(f"Fetching OpenET data for '{selected_section}'..."):
-                openet_df = fetch_openet_data(section_data.geometry, start_date, end_date, OPENET_API_KEY)
-                if openet_df is not None and not openet_df.empty:
-                    st.session_state[f'openet_{selected_section}'] = openet_df
+                # Fetch both datasets
+                et_df = fetch_openet_data(section_data.geometry, start_date, end_date, OPENET_API_KEY)
+                ndvi_df = fetch_ndvi_data(section_data.geometry, start_date, end_date, OPENET_API_KEY)
+
+                # Clear previous data
+                session_key = f'data_{selected_section}'
+                if session_key in st.session_state:
+                    del st.session_state[session_key]
+                
+                # Merge if both are available
+                if et_df is not None and ndvi_df is not None:
+                    # Merge the two dataframes on their common date index
+                    combined_df = pd.merge(et_df, ndvi_df, left_index=True, right_index=True, how='outer')
+                    st.session_state[session_key] = combined_df
+                    st.success("Successfully fetched and combined ET and NDVI data!")
+                elif et_df is not None:
+                    st.session_state[session_key] = et_df
+                    st.info("Fetched ET data, but NDVI was unavailable.")
+                elif ndvi_df is not None:
+                    st.session_state[session_key] = ndvi_df
+                    st.info("Fetched NDVI data, but ET was unavailable.")
                 else:
-                    st.warning("No data returned from OpenET. This could be due to the date range or API issues.")
-                    if f'openet_{selected_section}' in st.session_state:
-                        del st.session_state[f'openet_{selected_section}']
-    
-    # Display fetched OpenET data if it exists in the session state
-    if st.session_state.get(f'openet_{selected_section}') is not None:
+                    st.warning("No data returned from OpenET for either ET or NDVI. This could be due to the date range or API issues.")
+
+    # --- UPDATED DISPLAY SECTION ---
+    # Display fetched data if it exists in the session state
+    session_key = f'data_{selected_section}'
+    if st.session_state.get(session_key) is not None:
         st.markdown("---")
         st.subheader(f"OpenET Data for Section: {selected_section}")
-        df_to_show = st.session_state[f'openet_{selected_section}']
+        df_to_show = st.session_state[session_key]
+
+        # Define columns for charts
+        plot1, plot2, plot3 = st.columns(3)
+
+        # Plot ET if available
+        if 'ET (in)' in df_to_show.columns:
+            with plot1:
+                st.markdown("##### Daily Evapotranspiration (ET)")
+                st.line_chart(df_to_show['ET (in)'])
+            
+            # Calculate and plot Cumulative ET
+            df_to_show['Cumulative ET (in)'] = df_to_show['ET (in)'].cumsum()
+            with plot3:
+                st.markdown("##### Cumulative Water Use (ET)")
+                st.line_chart(df_to_show['Cumulative ET (in)'])
+        else:
+            plot1.info("ET data not available.")
+            plot3.info("Cumulative ET not available.")
         
-        # Calculate cumulative sum
-        df_to_show['Cumulative ET (in)'] = df_to_show['ET (in)'].cumsum()
-        
-        # Display charts side-by-side
-        plot1, plot2 = st.columns(2)
-        with plot1:
-            st.markdown("##### Daily Evapotranspiration (ET)")
-            st.line_chart(df_to_show['ET (in)'])
-        with plot2:
-            st.markdown("##### Cumulative Water Use (ET)")
-            st.line_chart(df_to_show['Cumulative ET (in)'])
-        
+        # Plot NDVI if available
+        if 'NDVI' in df_to_show.columns:
+            with plot2:
+                st.markdown("##### Daily NDVI")
+                st.line_chart(df_to_show['NDVI'])
+        else:
+            plot2.info("NDVI data not available.")
+
         st.markdown("##### Raw Data")
         st.dataframe(df_to_show)
