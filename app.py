@@ -249,14 +249,6 @@ else:
                 et_df = fetch_openet_data(section_data.geometry, start_date, end_date, OPENET_API_KEY)
                 ndvi_df = fetch_ndvi_data(section_data.geometry, start_date, end_date, OPENET_API_KEY)
 
-                # --- START DEBUGGING CODE ---
-                st.subheader("🕵️ Debug Output")
-                st.write("ET DataFrame received from API:")
-                st.write(et_df)
-                st.write("NDVI DataFrame received from API:")
-                st.write(ndvi_df)
-                # --- END DEBUGGING CODE ---
-
                 # Clear previous data
                 session_key = f'data_{selected_section}'
                 if session_key in st.session_state:
