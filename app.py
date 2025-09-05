@@ -276,31 +276,30 @@ else:
         st.subheader(f"OpenET Data for Section: {selected_section}")
         df_to_show = st.session_state[session_key]
 
-        # Define columns for charts
-        plot1, plot2, plot3 = st.columns(3)
+        # --- MODIFIED SECTION: Plots are now stacked vertically ---
 
-        # Plot ET if available
+        # Plot Daily ET if available
         if 'ET (in)' in df_to_show.columns:
-            with plot1:
-                st.markdown("##### Daily Evapotranspiration (ET)")
-                st.line_chart(df_to_show['ET (in)'])
-            
-            # Calculate and plot Cumulative ET
-            df_to_show['Cumulative ET (in)'] = df_to_show['ET (in)'].cumsum()
-            with plot3:
-                st.markdown("##### Cumulative Water Use (ET)")
-                st.line_chart(df_to_show['Cumulative ET (in)'])
+            st.markdown("##### Daily Evapotranspiration (ET)")
+            st.line_chart(df_to_show['ET (in)'])
         else:
-            plot1.info("ET data not available.")
-            plot3.info("Cumulative ET not available.")
+            st.info("Daily ET data not available.")
         
-        # Plot NDVI if available
+        # Plot Daily NDVI if available
         if 'NDVI' in df_to_show.columns:
-            with plot2:
-                st.markdown("##### Daily NDVI")
-                st.line_chart(df_to_show['NDVI'])
+            st.markdown("##### Daily NDVI")
+            st.line_chart(df_to_show['NDVI'])
         else:
-            plot2.info("NDVI data not available.")
+            st.info("NDVI data not available.")
 
+        # Plot Cumulative ET if available
+        if 'ET (in)' in df_to_show.columns:
+            df_to_show['Cumulative ET (in)'] = df_to_show['ET (in)'].cumsum()
+            st.markdown("##### Cumulative Water Use (ET)")
+            st.line_chart(df_to_show['Cumulative ET (in)'])
+        else:
+            st.info("Cumulative ET data not available.")
+
+        st.markdown("---")
         st.markdown("##### Raw Data")
         st.dataframe(df_to_show)
