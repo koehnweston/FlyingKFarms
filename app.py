@@ -117,7 +117,6 @@ def fetch_openet_data(_geometry, start_date, end_date, api_key):
         handle_api_error(e)
         return None
 
-# --- NEW FUNCTION FOR NDVI ---
 @st.cache_data
 def fetch_ndvi_data(_geometry, start_date, end_date, api_key):
     """
@@ -134,12 +133,12 @@ def fetch_ndvi_data(_geometry, start_date, end_date, api_key):
     payload = {
         "date_range": [start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")],
         "geometry": geometry_list,
-        "model": "ssebop",          # SSEBOP is a common and reliable model for NDVI
+        "model": "ssebop",
         "variable": "ndvi",
-        "reference_et": "gridMET",  # This field is required by the API, even for NDVI
+        "reference_et": "gridMET",
         "interval": "daily",
         "reducer": "mean",
-        "file_format": "JSON"       # NDVI is unitless, so 'units' key is omitted
+        "file_format": "JSON"
     }
 
     try:
@@ -156,8 +155,6 @@ def fetch_ndvi_data(_geometry, start_date, end_date, api_key):
         df.set_index('date', inplace=True)
         df.rename(columns={'ndvi': 'NDVI'}, inplace=True)
         
-        # NDVI values can sometimes be null if there's cloud cover, etc.
-        # We fill them forward to have a more continuous line chart.
         df['NDVI'] = df['NDVI'].interpolate(method='linear')
 
         return df[['NDVI']]
@@ -252,6 +249,14 @@ else:
                 et_df = fetch_openet_data(section_data.geometry, start_date, end_date, OPENET_API_KEY)
                 ndvi_df = fetch_ndvi_data(section_data.geometry, start_date, end_date, OPENET_API_KEY)
 
+                # --- START DEBUGGING CODE ---
+                st.subheader("🕵️ Debug Output")
+                st.write("ET DataFrame received from API:")
+                st.write(et_df)
+                st.write("NDVI DataFrame received from API:")
+                st.write(ndvi_df)
+                # --- END DEBUGGING CODE ---
+
                 # Clear previous data
                 session_key = f'data_{selected_section}'
                 if session_key in st.session_state:
@@ -272,7 +277,6 @@ else:
                 else:
                     st.warning("No data returned from OpenET for either ET or NDVI. This could be due to the date range or API issues.")
 
-    # --- UPDATED DISPLAY SECTION ---
     # Display fetched data if it exists in the session state
     session_key = f'data_{selected_section}'
     if st.session_state.get(session_key) is not None:
