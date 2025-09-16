@@ -179,8 +179,8 @@ def fetch_precipitation_data(_geometry, start_date, end_date, api_key):
     payload = {
         "date_range": [start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")],
         "geometry": geometry_list,
-        "model": "gridmet",  # Precipitation data comes from the gridMET model
-        "variable": "pr",    # 'pr' is the variable for precipitation
+        "model": "Ensemble",  # <-- CORRECTED: Use an ET model like Ensemble
+        "variable": "pr",     # 'pr' is the variable for precipitation
         "reference_et": "gridMET",
         "interval": "daily",
         "reducer": "mean",
