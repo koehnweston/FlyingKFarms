@@ -74,14 +74,17 @@ def handle_api_error(e):
             st.text(e.response.text)
 
 @st.cache_data
-def fetch_openet_data(_geometry, start_date, end_date, api_key):
+def fetch_openet_variable(
+    _section_name, _geometry, start_date, end_date, api_key, variable, new_column_name, model="Ensemble", units=None
+):
     """
-    Fetches daily Evapotranspiration (ET) time series data from the OpenET API.
+    Generic function to fetch a time series variable from the OpenET API.
+    _section_name is unused but vital for Streamlit's cache to work correctly.
     """
     headers = {
         "accept": "application/json",
         "Content-Type": "application/json",
-        "Authorization": api_key
+        "Authorization": api_key,
     }
     coords = _geometry.exterior.coords
     geometry_list = [val for pair in coords for val in pair]
@@ -89,14 +92,16 @@ def fetch_openet_data(_geometry, start_date, end_date, api_key):
     payload = {
         "date_range": [start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")],
         "geometry": geometry_list,
-        "model": "Ensemble",
-        "variable": "ET",
+        "model": model,
+        "variable": variable,
         "reference_et": "gridMET",
         "interval": "daily",
         "reducer": "mean",
-        "units": "in",
-        "file_format": "JSON"
+        "file_format": "JSON",
     }
+    # Only add units to payload if provided
+    if units:
+        payload["units"] = units
 
     try:
         response = requests.post(API_URL, headers=headers, json=payload)
@@ -107,103 +112,17 @@ def fetch_openet_data(_geometry, start_date, end_date, api_key):
         
         if df.empty:
             return None
-        
+            
         df['date'] = pd.to_datetime(df['time'])
         df.set_index('date', inplace=True)
-        df.rename(columns={'et': 'ET (in)'}, inplace=True)
-        
-        return df[['ET (in)']]
-        
-    except requests.exceptions.RequestException as e:
-        handle_api_error(e)
-        return None
+        # The key is to use the raw variable name returned by the API ('et', 'ndvi', 'pr')
+        df.rename(columns={variable.lower(): new_column_name}, inplace=True)
 
-@st.cache_data
-def fetch_ndvi_data(_geometry, start_date, end_date, api_key):
-    """
-    Fetches daily Normalized Difference Vegetation Index (NDVI) time series from the OpenET API.
-    """
-    headers = {
-        "accept": "application/json",
-        "Content-Type": "application/json",
-        "Authorization": api_key
-    }
-    coords = _geometry.exterior.coords
-    geometry_list = [val for pair in coords for val in pair]
-    
-    payload = {
-        "date_range": [start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")],
-        "geometry": geometry_list,
-        "model": "ssebop",
-        "variable": "ndvi",
-        "reference_et": "gridMET",
-        "interval": "daily",
-        "reducer": "mean",
-        "file_format": "JSON"
-    }
-
-    try:
-        response = requests.post(API_URL, headers=headers, json=payload)
-        response.raise_for_status()
-        
-        data = response.json()
-        df = pd.DataFrame(data)
-        
-        if df.empty:
-            return None
-        
-        df['date'] = pd.to_datetime(df['time'])
-        df.set_index('date', inplace=True)
-        df.rename(columns={'ndvi': 'NDVI'}, inplace=True)
-        
-        df['NDVI'] = df['NDVI'].interpolate(method='linear')
-
-        return df[['NDVI']]
-        
-    except requests.exceptions.RequestException as e:
-        handle_api_error(e)
-        return None
-
-@st.cache_data
-def fetch_precipitation_data(_geometry, start_date, end_date, api_key):
-    """
-    Fetches daily total precipitation time series from the OpenET API.
-    """
-    headers = {
-        "accept": "application/json",
-        "Content-Type": "application/json",
-        "Authorization": api_key
-    }
-    coords = _geometry.exterior.coords
-    geometry_list = [val for pair in coords for val in pair]
-    
-    payload = {
-        "date_range": [start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")],
-        "geometry": geometry_list,
-        "model": "Ensemble",
-        "variable": "pr",
-        "reference_et": "gridMET",
-        "interval": "daily",
-        "reducer": "mean",
-        "units": "in",
-        "file_format": "JSON"
-    }
-
-    try:
-        response = requests.post(API_URL, headers=headers, json=payload)
-        response.raise_for_status()
-        
-        data = response.json()
-        df = pd.DataFrame(data)
-        
-        if df.empty:
-            return None
-        
-        df['date'] = pd.to_datetime(df['time'])
-        df.set_index('date', inplace=True)
-        df.rename(columns={'pr': 'Precipitation (in)'}, inplace=True)
-        
-        return df[['Precipitation (in)']]
+        # Specific handling for NDVI interpolation
+        if variable == 'ndvi':
+            df[new_column_name] = df[new_column_name].interpolate(method='linear')
+            
+        return df[[new_column_name]]
         
     except requests.exceptions.RequestException as e:
         handle_api_error(e)
@@ -291,9 +210,18 @@ else:
             st.warning("Start date cannot be after end date.")
         elif st.button("Fetch ET, NDVI, and Precipitation Data"):
             with st.spinner(f"Fetching OpenET data for '{selected_section}'..."):
-                et_df = fetch_openet_data(section_data.geometry, start_date, end_date, OPENET_API_KEY)
-                ndvi_df = fetch_ndvi_data(section_data.geometry, start_date, end_date, OPENET_API_KEY)
-                precip_df = fetch_precipitation_data(section_data.geometry, start_date, end_date, OPENET_API_KEY)
+                et_df = fetch_openet_variable(
+                    selected_section, section_data.geometry, start_date, end_date, OPENET_API_KEY,
+                    variable="ET", new_column_name="ET (in)", units="in"
+                )
+                ndvi_df = fetch_openet_variable(
+                    selected_section, section_data.geometry, start_date, end_date, OPENET_API_KEY,
+                    variable="ndvi", new_column_name="NDVI", model="ssebop"
+                )
+                precip_df = fetch_openet_variable(
+                    selected_section, section_data.geometry, start_date, end_date, OPENET_API_KEY,
+                    variable="pr", new_column_name="Precipitation (in)", units="in"
+                )
 
                 session_key = f'data_{selected_section}'
                 if session_key in st.session_state:
