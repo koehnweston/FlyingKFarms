@@ -275,7 +275,7 @@ else:
             
             # 2. Create a boolean mask to identify the pumping season (May 1 to Sep 20)
             pumping_season_mask = df_to_show.index.to_series().apply(
-                lambda d: (5, 1) <= (d.month, d.day) <= (9, 20)
+                lambda d: (5, 25) <= (d.month, d.day) <= (9, 20)
             )
 
             # 3. Apply the seasonal rule: set daily deficit to 0 outside the pumping season
