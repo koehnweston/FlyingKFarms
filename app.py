@@ -163,6 +163,51 @@ def fetch_ndvi_data(_geometry, start_date, end_date, api_key):
         handle_api_error(e)
         return None
 
+@st.cache_data
+def fetch_precipitation_data(_geometry, start_date, end_date, api_key):
+    """
+    Fetches daily total precipitation time series from the OpenET API.
+    """
+    headers = {
+        "accept": "application/json",
+        "Content-Type": "application/json",
+        "Authorization": api_key
+    }
+    coords = _geometry.exterior.coords
+    geometry_list = [val for pair in coords for val in pair]
+    
+    payload = {
+        "date_range": [start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")],
+        "geometry": geometry_list,
+        "model": "gridmet",  # Precipitation data comes from the gridMET model
+        "variable": "pr",    # 'pr' is the variable for precipitation
+        "reference_et": "gridMET",
+        "interval": "daily",
+        "reducer": "mean",
+        "units": "in",
+        "file_format": "JSON"
+    }
+
+    try:
+        response = requests.post(API_URL, headers=headers, json=payload)
+        response.raise_for_status()
+        
+        data = response.json()
+        df = pd.DataFrame(data)
+        
+        if df.empty:
+            return None
+        
+        df['date'] = pd.to_datetime(df['time'])
+        df.set_index('date', inplace=True)
+        df.rename(columns={'pr': 'Precipitation (in)'}, inplace=True)
+        
+        return df[['Precipitation (in)']]
+        
+    except requests.exceptions.RequestException as e:
+        handle_api_error(e)
+        return None
+
 # --- Main App ---
 st.markdown("# 🌾 Farming Data Entry")
 
@@ -226,7 +271,7 @@ else:
         st_folium(m, key=selected_section, width=725, height=500)
 
     st.markdown("---")
-    st.markdown("### Fetch OpenET Data (ET & NDVI)")
+    st.markdown("### Fetch OpenET Data (ET, NDVI, & Precipitation)")
 
     if not OPENET_API_KEY:
         st.error("OpenET API key not configured.")
@@ -243,31 +288,30 @@ else:
 
         if start_date > end_date:
             st.warning("Start date cannot be after end date.")
-        elif st.button("Fetch ET and NDVI Data"):
+        elif st.button("Fetch ET, NDVI, and Precipitation Data"):
             with st.spinner(f"Fetching OpenET data for '{selected_section}'..."):
-                # Fetch both datasets
+                # Fetch all three datasets
                 et_df = fetch_openet_data(section_data.geometry, start_date, end_date, OPENET_API_KEY)
                 ndvi_df = fetch_ndvi_data(section_data.geometry, start_date, end_date, OPENET_API_KEY)
+                precip_df = fetch_precipitation_data(section_data.geometry, start_date, end_date, OPENET_API_KEY)
 
                 # Clear previous data
                 session_key = f'data_{selected_section}'
                 if session_key in st.session_state:
                     del st.session_state[session_key]
                 
-                # Merge if both are available
-                if et_df is not None and ndvi_df is not None:
-                    # Merge the two dataframes on their common date index
-                    combined_df = pd.merge(et_df, ndvi_df, left_index=True, right_index=True, how='outer')
+                # Merge the dataframes
+                data_frames = [df for df in [et_df, ndvi_df, precip_df] if df is not None]
+                
+                if data_frames:
+                    combined_df = data_frames[0]
+                    for df in data_frames[1:]:
+                        combined_df = pd.merge(combined_df, df, left_index=True, right_index=True, how='outer')
+                    
                     st.session_state[session_key] = combined_df
-                    st.success("Successfully fetched and combined ET and NDVI data!")
-                elif et_df is not None:
-                    st.session_state[session_key] = et_df
-                    st.info("Fetched ET data, but NDVI was unavailable.")
-                elif ndvi_df is not None:
-                    st.session_state[session_key] = ndvi_df
-                    st.info("Fetched NDVI data, but ET was unavailable.")
+                    st.success("Successfully fetched and combined all available data!")
                 else:
-                    st.warning("No data returned from OpenET for either ET or NDVI. This could be due to the date range or API issues.")
+                    st.warning("No data returned from OpenET for any variable. This could be due to the date range or API issues.")
 
     # Display fetched data if it exists in the session state
     session_key = f'data_{selected_section}'
@@ -276,29 +320,34 @@ else:
         st.subheader(f"OpenET Data for Section: {selected_section}")
         df_to_show = st.session_state[session_key]
 
-        # --- MODIFIED SECTION: Plots are now stacked vertically ---
+        # --- Plots are now stacked vertically ---
 
-        # Plot Daily ET if available
+        # Plot Daily ET
         if 'ET (in)' in df_to_show.columns:
             st.markdown("##### Daily Evapotranspiration (ET)")
             st.line_chart(df_to_show['ET (in)'])
-        else:
-            st.info("Daily ET data not available.")
         
-        # Plot Daily NDVI if available
+        # Plot Daily Precipitation
+        if 'Precipitation (in)' in df_to_show.columns:
+            st.markdown("##### Daily Precipitation")
+            st.bar_chart(df_to_show['Precipitation (in)'])
+
+        # Plot Daily NDVI
         if 'NDVI' in df_to_show.columns:
             st.markdown("##### Daily NDVI")
             st.line_chart(df_to_show['NDVI'])
-        else:
-            st.info("NDVI data not available.")
-
-        # Plot Cumulative ET if available
+        
+        # Plot Cumulative ET
         if 'ET (in)' in df_to_show.columns:
             df_to_show['Cumulative ET (in)'] = df_to_show['ET (in)'].cumsum()
             st.markdown("##### Cumulative Water Use (ET)")
             st.line_chart(df_to_show['Cumulative ET (in)'])
-        else:
-            st.info("Cumulative ET data not available.")
+
+        # Plot Cumulative Precipitation
+        if 'Precipitation (in)' in df_to_show.columns:
+            df_to_show['Cumulative Precipitation (in)'] = df_to_show['Precipitation (in)'].cumsum()
+            st.markdown("##### Cumulative Precipitation")
+            st.line_chart(df_to_show['Cumulative Precipitation (in)'])
 
         st.markdown("---")
         st.markdown("##### Raw Data")
