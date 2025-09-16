@@ -9,6 +9,7 @@ import os
 import folium
 from streamlit_folium import st_folium
 import json
+import numpy as np
 
 # --- Page Configuration ---
 st.set_page_config(page_title="Farming Data Entry", page_icon="🌾", layout="wide")
@@ -314,7 +315,7 @@ else:
     if st.session_state.get(session_key) is not None:
         st.markdown("---")
         st.subheader(f"OpenET Data for Section: {selected_section}")
-        df_to_show = st.session_state[session_key]
+        df_to_show = st.session_state[session_key].copy()
 
         if 'ET (in)' in df_to_show.columns:
             st.markdown("##### Daily Evapotranspiration (ET)")
@@ -338,19 +339,20 @@ else:
             st.markdown("##### Cumulative Precipitation")
             st.line_chart(df_to_show['Cumulative Precipitation (in)'])
 
-        # --- Plot for Consumed Groundwater ---
-        if 'ET (in)' in df_to_show.columns and 'Precipitation (in)' in df_to_show.columns:
-            # Fill any missing values with 0 for the calculation
-            et_daily = df_to_show['ET (in)'].fillna(0)
-            precip_daily = df_to_show['Precipitation (in)'].fillna(0)
+        # --- UPDATED PLOT WITH SEASONAL RULES ---
+        if 'Cumulative ET (in)' in df_to_show.columns and 'Cumulative Precipitation (in)' in df_to_show.columns:
             
-            # Calculate the daily deficit, but set it to 0 if negative (i.e., on rainy days)
-            # This ensures we only accumulate on days where ET > Precip
-            daily_groundwater_use = (et_daily - precip_daily).clip(lower=0)
+            # Calculate the potential deficit for all days
+            potential_deficit = (df_to_show['Cumulative ET (in)'] - df_to_show['Cumulative Precipitation (in)']).clip(lower=0)
             
-            # Create the monotonically increasing cumulative sum
-            df_to_show['Consumed Groundwater (in)'] = daily_groundwater_use.cumsum()
+            # Create a boolean mask to identify the pumping season (May 1 to Sep 20)
+            pumping_season_mask = df_to_show.index.to_series().apply(
+                lambda d: (5, 1) <= (d.month, d.day) <= (9, 20)
+            )
             
+            # Apply the deficit calculation only within the pumping season, otherwise it's 0
+            df_to_show['Consumed Groundwater (in)'] = np.where(pumping_season_mask, potential_deficit, 0)
+
             st.markdown("##### Consumed Groundwater (in)")
             st.line_chart(df_to_show['Consumed Groundwater (in)'])
 
