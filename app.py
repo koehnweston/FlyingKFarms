@@ -130,8 +130,8 @@ def run_irrigation_simulation(df):
     Simulates daily plant available water and irrigation based on a set of rules.
     """
     # --- Model Parameters ---
-    MAX_PAW = 4.5  # inches, equivalent to Field Capacity
-    IRRIGATION_TRIGGER_LEVEL = MAX_PAW / 2  # inches
+    MAX_PAW = 6  # inches, equivalent to Field Capacity
+    IRRIGATION_TRIGGER_LEVEL = 3*MAX_PAW / 4  # inches
     MAX_DAILY_IRRIGATION = 650*1440/325851/125*12  # inches
 
     sim_df = df.copy()
