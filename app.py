@@ -99,7 +99,6 @@ def fetch_openet_variable(
         "reducer": "mean",
         "file_format": "JSON",
     }
-    # Only add units to payload if provided
     if units:
         payload["units"] = units
 
@@ -115,10 +114,8 @@ def fetch_openet_variable(
             
         df['date'] = pd.to_datetime(df['time'])
         df.set_index('date', inplace=True)
-        # The key is to use the raw variable name returned by the API ('et', 'ndvi', 'pr')
         df.rename(columns={variable.lower(): new_column_name}, inplace=True)
 
-        # Specific handling for NDVI interpolation
         if variable == 'ndvi':
             df[new_column_name] = df[new_column_name].interpolate(method='linear')
             
@@ -127,6 +124,59 @@ def fetch_openet_variable(
     except requests.exceptions.RequestException as e:
         handle_api_error(e)
         return None
+
+def run_irrigation_simulation(df):
+    """
+    Simulates daily plant available water and irrigation based on a set of rules.
+    """
+    # --- Model Parameters ---
+    MAX_PAW = 6.0  # inches, equivalent to Field Capacity
+    IRRIGATION_TRIGGER_LEVEL = MAX_PAW / 2.0  # inches
+    MAX_DAILY_IRRIGATION = 0.25  # inches
+
+    sim_df = df.copy()
+    
+    # --- Initialize simulation columns ---
+    sim_df['Plant Available Water (in)'] = MAX_PAW
+    sim_df['Irrigation Applied (in)'] = 0.0
+
+    # --- Loop through each day of the dataset ---
+    for i in range(1, len(sim_df)):
+        prev_paw = sim_df.iloc[i-1]['Plant Available Water (in)']
+        
+        current_date = sim_df.index[i]
+        daily_et = sim_df.iloc[i]['ET (in)'].fillna(0)
+        daily_precip = sim_df.iloc[i]['Precipitation (in)'].fillna(0)
+
+        # --- Determine if today is in the pumping season (May 25 - Sep 20) ---
+        is_in_season = (5, 25) <= (current_date.month, current_date.day) <= (9, 20)
+
+        # --- Reset PAW to max on the first day of the season each year ---
+        prev_date = sim_df.index[i-1]
+        is_prev_day_in_season = (5, 25) <= (prev_date.month, prev_date.day) <= (9, 20)
+        if is_in_season and not is_prev_day_in_season:
+             prev_paw = MAX_PAW
+
+        # --- Calculate water balance before considering irrigation ---
+        current_paw = prev_paw - daily_et + daily_precip
+        
+        irrigation_today = 0.0
+        if is_in_season:
+            # --- Trigger irrigation if PAW is at or below the threshold ---
+            if current_paw <= IRRIGATION_TRIGGER_LEVEL:
+                needed_water = MAX_PAW - current_paw
+                irrigation_today = min(needed_water, MAX_DAILY_IRRIGATION)
+
+        # --- Update final PAW for the day, clamping between 0 and MAX_PAW ---
+        final_paw = max(0, min(current_paw + irrigation_today, MAX_PAW))
+
+        # --- Store results for the current day ---
+        sim_df.iloc[i, sim_df.columns.get_loc('Plant Available Water (in)')] = final_paw
+        sim_df.iloc[i, sim_df.columns.get_loc('Irrigation Applied (in)')] = irrigation_today
+        
+    # --- Calculate cumulative consumed groundwater (total irrigation) ---
+    sim_df['Consumed Groundwater (in)'] = sim_df['Irrigation Applied (in)'].cumsum()
+    return sim_df
 
 # --- Main App ---
 st.markdown("# 🌾 Farming Data Entry")
@@ -242,51 +292,32 @@ else:
     session_key = f'data_{selected_section}'
     if st.session_state.get(session_key) is not None:
         st.markdown("---")
-        st.subheader(f"OpenET Data for Section: {selected_section}")
+        st.subheader(f"Data & Irrigation Simulation for Section: {selected_section}")
         df_to_show = st.session_state[session_key].copy()
 
-        if 'ET (in)' in df_to_show.columns:
-            st.markdown("##### Daily Evapotranspiration (ET)")
-            st.line_chart(df_to_show['ET (in)'])
-        
-        if 'Precipitation (in)' in df_to_show.columns:
-            st.markdown("##### Daily Precipitation")
-            st.bar_chart(df_to_show['Precipitation (in)'])
-
-        if 'NDVI' in df_to_show.columns:
-            st.markdown("##### Daily NDVI")
-            st.line_chart(df_to_show['NDVI'])
-        
-        if 'ET (in)' in df_to_show.columns:
-            df_to_show['Cumulative ET (in)'] = df_to_show['ET (in)'].cumsum()
-            st.markdown("##### Cumulative Water Use (ET)")
-            st.line_chart(df_to_show['Cumulative ET (in)'])
-
-        if 'Precipitation (in)' in df_to_show.columns:
-            df_to_show['Cumulative Precipitation (in)'] = df_to_show['Precipitation (in)'].cumsum()
-            st.markdown("##### Cumulative Precipitation")
-            st.line_chart(df_to_show['Cumulative Precipitation (in)'])
-
-        # --- CORRECTED CUMULATIVE PLOT WITH SEASONAL RULES ---
+        # --- RUN AND DISPLAY IRRIGATION SIMULATION ---
         if 'ET (in)' in df_to_show.columns and 'Precipitation (in)' in df_to_show.columns:
             
-            # 1. Calculate the daily deficit, setting it to 0 if negative (i.e., on rainy days)
-            daily_deficit = (df_to_show['ET (in)'].fillna(0) - df_to_show['Precipitation (in)'].fillna(0)).clip(lower=0)
+            # Run the simulation
+            simulated_df = run_irrigation_simulation(df_to_show)
             
-            # 2. Create a boolean mask to identify the pumping season (May 1 to Sep 20)
-            pumping_season_mask = df_to_show.index.to_series().apply(
-                lambda d: (5, 25) <= (d.month, d.day) <= (9, 20)
-            )
+            st.markdown("##### Daily Plant Available Water (PAW)")
+            st.info("Simulation assumes a max PAW of 6 inches. Irrigation is triggered when PAW drops to 3 inches.")
+            st.line_chart(simulated_df['Plant Available Water (in)'])
 
-            # 3. Apply the seasonal rule: set daily deficit to 0 outside the pumping season
-            daily_deficit.loc[~pumping_season_mask] = 0
+            st.markdown("##### Simulated Consumed Groundwater (Cumulative Irrigation)")
+            st.info("Irrigation is limited to a maximum of 0.25 inches per day and only occurs between May 25 and Sep 20.")
+            st.line_chart(simulated_df['Consumed Groundwater (in)'])
             
-            # 4. Create the final, monotonically increasing cumulative sum
-            df_to_show['Consumed Groundwater (in)'] = daily_deficit.cumsum()
-
-            st.markdown("##### Consumed Groundwater (in)")
-            st.line_chart(df_to_show['Consumed Groundwater (in)'])
+            # Add simulation results to the main dataframe for the table view
+            df_to_show = simulated_df.copy()
+        
+        else:
+             st.warning("ET and/or Precipitation data is missing. Cannot run irrigation simulation.")
+             if 'NDVI' in df_to_show.columns:
+                st.markdown("##### Daily NDVI")
+                st.line_chart(df_to_show['NDVI'])
 
         st.markdown("---")
-        st.markdown("##### Raw Data")
+        st.markdown("##### Raw Data Table (with simulation results)")
         st.dataframe(df_to_show)
