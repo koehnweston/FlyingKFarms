@@ -179,8 +179,8 @@ def fetch_precipitation_data(_geometry, start_date, end_date, api_key):
     payload = {
         "date_range": [start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")],
         "geometry": geometry_list,
-        "model": "Ensemble",  # <-- CORRECTED: Use an ET model like Ensemble
-        "variable": "pr",     # 'pr' is the variable for precipitation
+        "model": "Ensemble",
+        "variable": "pr",
         "reference_et": "gridMET",
         "interval": "daily",
         "reducer": "mean",
@@ -290,17 +290,14 @@ else:
             st.warning("Start date cannot be after end date.")
         elif st.button("Fetch ET, NDVI, and Precipitation Data"):
             with st.spinner(f"Fetching OpenET data for '{selected_section}'..."):
-                # Fetch all three datasets
                 et_df = fetch_openet_data(section_data.geometry, start_date, end_date, OPENET_API_KEY)
                 ndvi_df = fetch_ndvi_data(section_data.geometry, start_date, end_date, OPENET_API_KEY)
                 precip_df = fetch_precipitation_data(section_data.geometry, start_date, end_date, OPENET_API_KEY)
 
-                # Clear previous data
                 session_key = f'data_{selected_section}'
                 if session_key in st.session_state:
                     del st.session_state[session_key]
                 
-                # Merge the dataframes
                 data_frames = [df for df in [et_df, ndvi_df, precip_df] if df is not None]
                 
                 if data_frames:
@@ -311,43 +308,47 @@ else:
                     st.session_state[session_key] = combined_df
                     st.success("Successfully fetched and combined all available data!")
                 else:
-                    st.warning("No data returned from OpenET for any variable. This could be due to the date range or API issues.")
+                    st.warning("No data returned from OpenET for any variable.")
 
-    # Display fetched data if it exists in the session state
     session_key = f'data_{selected_section}'
     if st.session_state.get(session_key) is not None:
         st.markdown("---")
         st.subheader(f"OpenET Data for Section: {selected_section}")
         df_to_show = st.session_state[session_key]
 
-        # --- Plots are now stacked vertically ---
-
-        # Plot Daily ET
         if 'ET (in)' in df_to_show.columns:
             st.markdown("##### Daily Evapotranspiration (ET)")
             st.line_chart(df_to_show['ET (in)'])
         
-        # Plot Daily Precipitation
         if 'Precipitation (in)' in df_to_show.columns:
             st.markdown("##### Daily Precipitation")
             st.bar_chart(df_to_show['Precipitation (in)'])
 
-        # Plot Daily NDVI
         if 'NDVI' in df_to_show.columns:
             st.markdown("##### Daily NDVI")
             st.line_chart(df_to_show['NDVI'])
         
-        # Plot Cumulative ET
         if 'ET (in)' in df_to_show.columns:
             df_to_show['Cumulative ET (in)'] = df_to_show['ET (in)'].cumsum()
             st.markdown("##### Cumulative Water Use (ET)")
             st.line_chart(df_to_show['Cumulative ET (in)'])
 
-        # Plot Cumulative Precipitation
         if 'Precipitation (in)' in df_to_show.columns:
             df_to_show['Cumulative Precipitation (in)'] = df_to_show['Precipitation (in)'].cumsum()
             st.markdown("##### Cumulative Precipitation")
             st.line_chart(df_to_show['Cumulative Precipitation (in)'])
+
+        # --- UPDATED PLOT ---
+        if 'Cumulative ET (in)' in df_to_show.columns and 'Cumulative Precipitation (in)' in df_to_show.columns:
+            # Calculate the new column with the requested name
+            df_to_show['Consumed Groundwater (in)'] = df_to_show['Cumulative ET (in)'] - df_to_show['Cumulative Precipitation (in)']
+            
+            # Update the markdown title
+            st.markdown("##### Consumed Groundwater (in)")
+            
+            # Plot the newly named column
+            st.line_chart(df_to_show['Consumed Groundwater (in)'])
+
 
         st.markdown("---")
         st.markdown("##### Raw Data")
