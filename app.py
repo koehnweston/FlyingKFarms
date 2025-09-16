@@ -136,6 +136,10 @@ def run_irrigation_simulation(df):
 
     sim_df = df.copy()
     
+    # --- FIX: Fill potential missing values in the columns before the loop ---
+    sim_df['ET (in)'] = sim_df['ET (in)'].fillna(0)
+    sim_df['Precipitation (in)'] = sim_df['Precipitation (in)'].fillna(0)
+
     # --- Initialize simulation columns ---
     sim_df['Plant Available Water (in)'] = MAX_PAW
     sim_df['Irrigation Applied (in)'] = 0.0
@@ -145,8 +149,9 @@ def run_irrigation_simulation(df):
         prev_paw = sim_df.iloc[i-1]['Plant Available Water (in)']
         
         current_date = sim_df.index[i]
-        daily_et = sim_df.iloc[i]['ET (in)'].fillna(0)
-        daily_precip = sim_df.iloc[i]['Precipitation (in)'].fillna(0)
+        # --- FIX: Removed .fillna(0) from these lines ---
+        daily_et = sim_df.iloc[i]['ET (in)']
+        daily_precip = sim_df.iloc[i]['Precipitation (in)']
 
         # --- Determine if today is in the pumping season (May 25 - Sep 20) ---
         is_in_season = (5, 25) <= (current_date.month, current_date.day) <= (9, 20)
