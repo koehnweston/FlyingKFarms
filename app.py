@@ -131,7 +131,7 @@ def run_irrigation_simulation(df):
     """
     # --- Model Parameters ---
     MAX_PAW = 6.0  # inches, equivalent to Field Capacity
-    IRRIGATION_TRIGGER_LEVEL = MAX_PAW / 2.0  # inches
+    IRRIGATION_TRIGGER_LEVEL = 3*MAX_PAW / 5  # inches
     MAX_DAILY_IRRIGATION = 0.25  # inches
 
     sim_df = df.copy()
