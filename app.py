@@ -339,23 +339,25 @@ else:
             st.markdown("##### Cumulative Precipitation")
             st.line_chart(df_to_show['Cumulative Precipitation (in)'])
 
-        # --- UPDATED PLOT WITH SEASONAL RULES ---
-        if 'Cumulative ET (in)' in df_to_show.columns and 'Cumulative Precipitation (in)' in df_to_show.columns:
+        # --- CORRECTED CUMULATIVE PLOT WITH SEASONAL RULES ---
+        if 'ET (in)' in df_to_show.columns and 'Precipitation (in)' in df_to_show.columns:
             
-            # Calculate the potential deficit for all days
-            potential_deficit = (df_to_show['Cumulative ET (in)'] - df_to_show['Cumulative Precipitation (in)']).clip(lower=0)
+            # 1. Calculate the daily deficit, setting it to 0 if negative (i.e., on rainy days)
+            daily_deficit = (df_to_show['ET (in)'].fillna(0) - df_to_show['Precipitation (in)'].fillna(0)).clip(lower=0)
             
-            # Create a boolean mask to identify the pumping season (May 1 to Sep 20)
+            # 2. Create a boolean mask to identify the pumping season (May 1 to Sep 20)
             pumping_season_mask = df_to_show.index.to_series().apply(
                 lambda d: (5, 1) <= (d.month, d.day) <= (9, 20)
             )
+
+            # 3. Apply the seasonal rule: set daily deficit to 0 outside the pumping season
+            daily_deficit.loc[~pumping_season_mask] = 0
             
-            # Apply the deficit calculation only within the pumping season, otherwise it's 0
-            df_to_show['Consumed Groundwater (in)'] = np.where(pumping_season_mask, potential_deficit, 0)
+            # 4. Create the final, monotonically increasing cumulative sum
+            df_to_show['Consumed Groundwater (in)'] = daily_deficit.cumsum()
 
             st.markdown("##### Consumed Groundwater (in)")
             st.line_chart(df_to_show['Consumed Groundwater (in)'])
-
 
         st.markdown("---")
         st.markdown("##### Raw Data")
